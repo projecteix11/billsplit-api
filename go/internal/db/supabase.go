@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 )
 
 // Client is a minimal Supabase PostgREST HTTP client
@@ -21,15 +23,22 @@ var DB *Client
 
 // Init creates the global DB client from environment variables
 func Init() {
-	url := os.Getenv("SUPABASE_URL")
+	url := strings.TrimRight(os.Getenv("SUPABASE_URL"), "/")
 	key := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
 	if url == "" || key == "" {
 		panic("missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
 	}
 	DB = &Client{
-		baseURL:    url,
-		apiKey:     key,
-		httpClient: &http.Client{},
+		baseURL: url,
+		apiKey:  key,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 }
 
