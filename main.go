@@ -17,7 +17,7 @@ import (
 
 func main() {
 	// Load .env in development (ignored if the file is absent)
-	godotenv.Load("../.env") //nolint:errcheck
+	godotenv.Load(".env") //nolint:errcheck
 
 	// Initialize Supabase client
 	db.Init()
