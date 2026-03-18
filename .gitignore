@@ -1,2 +1,3 @@
 .env
 billsplit-api
+bash.ex*
