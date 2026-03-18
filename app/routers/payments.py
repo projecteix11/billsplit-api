@@ -1,23 +1,11 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from app.middleware.rate_limit import limiter
+from app.models import CreatePaymentBody, RedsysSignBody
 from app.services import payments as svc
 
 router = APIRouter()
-
-
-class CreatePaymentBody(BaseModel):
-    orderId: str
-    amount: float
-    method: str
-
-
-class RedsysSignBody(BaseModel):
-    amount: float
-    urlOk: str
-    urlKo: str
 
 
 @router.post("/api/payments", status_code=201)

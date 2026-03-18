@@ -1,23 +1,12 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
-from app.models import NewOrderItem
+from app.models import CreateOrderBody, AddItemsBody
 from app.services import orders as svc
 
 router = APIRouter()
-
-
-class CreateOrderBody(BaseModel):
-    tableId: str
-    tableNumber: int
-    items: list[NewOrderItem]
-
-
-class AddItemsBody(BaseModel):
-    items: list[NewOrderItem]
 
 
 @router.post("/api/orders", status_code=201)
