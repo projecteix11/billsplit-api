@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.middleware.auth import require_auth
+from app.middleware.rate_limit import limiter
 from app.services import orders as svc
 
 router = APIRouter()
@@ -21,7 +22,8 @@ class PaymentStatusBody(BaseModel):
 
 
 @router.patch("/api/order-items/{item_id}/kitchen-status")
-def update_kitchen_status(item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth)):
+@limiter.limit("20/minute")
+def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth)):
     if body.status not in VALID_KITCHEN_STATUSES:
         return JSONResponse(
             status_code=400,
@@ -35,7 +37,8 @@ def update_kitchen_status(item_id: str, body: KitchenStatusBody, _user_id: str =
 
 
 @router.patch("/api/order-items/payment-status")
-def update_payment_status(body: PaymentStatusBody):
+@limiter.limit("20/minute")
+def update_payment_status(request: Request, body: PaymentStatusBody):
     if not body.itemIds:
         return JSONResponse(status_code=400, content={"data": None, "error": "itemIds[] is required"})
     if body.status not in VALID_PAYMENT_STATUSES:

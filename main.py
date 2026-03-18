@@ -5,13 +5,19 @@ load_dotenv(".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.db import supabase
+from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
 from app.routers import dishes, orders, order_items, payments
 
 supabase.init()
 
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # CORS
 cors_origins = [
@@ -33,6 +39,7 @@ app.include_router(payments.router)
 
 
 @app.get("/api/health")
+@limiter.exempt
 def health():
     return {"status": "ok"}
 
