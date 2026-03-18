@@ -11,6 +11,7 @@ This is a Python port of the [Go implementation](https://github.com/projecteix11
 - **Requests** — HTTP client for Supabase PostgREST
 - **PyCryptodome** — 3DES-CBC for Redsys payment signing
 - **Supabase** — database (PostgREST + Auth)
+- **pytest** — testing framework
 
 ## Setup
 
@@ -53,6 +54,39 @@ Or with hot reload for development:
 uvicorn main:app --port 3001 --reload
 ```
 
+## Tests
+
+Tests use **pytest** with FastAPI's `TestClient`. Supabase and auth calls are mocked.
+
+```bash
+# Run all tests
+pytest
+
+# Run a single test file
+pytest tests/test_orders.py
+
+# Run a specific test
+pytest tests/test_orders.py::test_create_order_success
+
+# Verbose output
+pytest -v
+```
+
+### Last run (2026-03-18)
+
+| File | Tests | Coverage |
+|------|------:|----------|
+| `test_health.py` | 4 | Health endpoint |
+| `test_dishes.py` | 13 | Dishes & categories |
+| `test_orders.py` | 36 | All 6 order endpoints + auth |
+| `test_order_items.py` | 28 | Kitchen-status & payment-status |
+| `test_payments.py` | 29 | Payments + Redsys crypto |
+| `test_services.py` | 29 | Service layer & math helpers |
+| `test_auth.py` | 17 | Auth middleware & dependency |
+| `test_supabase_client.py` | 20 | DB client (init, CRUD, token) |
+| `test_rate_limit.py` | 8 | Rate limiting handler & config |
+| **Total** | **201** | **All passing in 0.39s** |
+
 ## API Routes
 
 ### Public
@@ -81,25 +115,28 @@ uvicorn main:app --port 3001 --reload
 ## Project Structure
 
 ```
-api/
-├── main.py              # App entry point, CORS, route registration
+├── main.py              # App entry point, CORS, middleware
 ├── requirements.txt
 └── app/
     ├── models.py        # Pydantic data models
     ├── db/
     │   └── supabase.py  # PostgREST HTTP client
     ├── middleware/
-    │   └── auth.py      # JWT auth dependency
+    │   ├── auth.py      # JWT auth dependency
+    │   └── rate_limit.py # Per-IP rate limiting (slowapi)
     ├── services/
     │   ├── dishes.py    # Dish & category logic
     │   ├── orders.py    # Order management & tax calculation
     │   └── payments.py  # Redsys signing & payment creation
     └── routers/
+        ├── __init__.py  # register() — centralizes all router inclusion
         ├── dishes.py
         ├── orders.py
         ├── order_items.py
         └── payments.py
 ```
+
+Router registration is centralized in `app/routers/__init__.py`. To add a new router, create the file in `app/routers/` and add it to the `register()` function — no changes needed in `main.py`.
 
 ## Response Format
 

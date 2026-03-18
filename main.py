@@ -9,14 +9,16 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.db import supabase
+from app.middleware.auth import AuthError, auth_error_handler
 from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
-from app.routers import dishes, orders, order_items, payments
+from app import routers
 
 supabase.init()
 
 app = FastAPI()
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_exception_handler(AuthError, auth_error_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # CORS
@@ -32,14 +34,10 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(dishes.router)
-app.include_router(orders.router)
-app.include_router(order_items.router)
-app.include_router(payments.router)
+routers.register(app)
 
 
 @app.get("/api/health")
-@limiter.exempt
 def health():
     return {"status": "ok"}
 
