@@ -15,7 +15,12 @@ from app import routers
 
 supabase.init()
 
-app = FastAPI()
+_debug = os.getenv("ENVIRONMENT", "production") != "production"
+app = FastAPI(
+    docs_url="/docs" if _debug else None,
+    redoc_url="/redoc" if _debug else None,
+    openapi_url="/openapi.json" if _debug else None,
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.add_exception_handler(AuthError, auth_error_handler)

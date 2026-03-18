@@ -15,15 +15,24 @@ REDSYS_URL = "https://sis-t.redsys.es:25443/sis/realizarPago"
 
 
 def _redsys_secret() -> str:
-    return os.getenv("REDSYS_SECRET", "sq7HjrUOBfKmC576ILgskD900SqIlHkI8awNPoDg")
+    secret = os.getenv("REDSYS_SECRET")
+    if not secret:
+        raise RuntimeError("REDSYS_SECRET environment variable is not set")
+    return secret
 
 
 def _redsys_merchant_code() -> str:
-    return os.getenv("REDSYS_MERCHANT_CODE", "999008881")
+    code = os.getenv("REDSYS_MERCHANT_CODE")
+    if not code:
+        raise RuntimeError("REDSYS_MERCHANT_CODE environment variable is not set")
+    return code
 
 
 def _redsys_terminal() -> str:
-    return os.getenv("REDSYS_TERMINAL", "001")
+    terminal = os.getenv("REDSYS_TERMINAL")
+    if not terminal:
+        raise RuntimeError("REDSYS_TERMINAL environment variable is not set")
+    return terminal
 
 
 def _derive_key(secret: str, order_number: str) -> bytes:

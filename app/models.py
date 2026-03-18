@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Dish(BaseModel):
@@ -44,11 +44,11 @@ class Order(BaseModel):
 
 
 class NewOrderItem(BaseModel):
-    dish_name: str
-    dish_price: float
-    quantity: int
-    notes: Optional[str] = None
-    diner_name: Optional[str] = None
+    dish_name: str = Field(min_length=1, max_length=200)
+    dish_price: float = Field(gt=0)
+    quantity: int = Field(ge=1, le=100)
+    notes: Optional[str] = Field(default=None, max_length=500)
+    diner_name: Optional[str] = Field(default=None, max_length=100)
 
 
 class Payment(BaseModel):
@@ -68,20 +68,20 @@ class Payment(BaseModel):
 class CreateOrderBody(BaseModel):
     tableId: str
     tableNumber: int
-    items: list[NewOrderItem]
+    items: list[NewOrderItem] = Field(min_length=1)
 
 
 class AddItemsBody(BaseModel):
-    items: list[NewOrderItem]
+    items: list[NewOrderItem] = Field(min_length=1)
 
 
 class CreatePaymentBody(BaseModel):
-    orderId: str
-    amount: float
-    method: str
+    orderId: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+    method: str = Field(min_length=1)
 
 
 class RedsysSignBody(BaseModel):
-    amount: float
-    urlOk: str
-    urlKo: str
+    amount: float = Field(gt=0)
+    urlOk: str = Field(min_length=1)
+    urlKo: str = Field(min_length=1)

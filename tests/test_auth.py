@@ -116,14 +116,13 @@ class TestUnprotectedRoutes:
             resp = client.get("/api/orders/some-order")
         assert resp.status_code != 401
 
-    def test_payment_status_no_auth_returns_200(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            resp = client.patch(
-                "/api/order-items/payment-status",
-                json={"itemIds": ["i-1"], "status": "paid"},
-            )
-        assert resp.status_code == 200
+    def test_payment_status_requires_auth_returns_401(self, client: TestClient):
+        """C4 security fix: payment-status now requires auth."""
+        resp = client.patch(
+            "/api/order-items/payment-status",
+            json={"itemIds": ["i-1"], "status": "paid"},
+        )
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

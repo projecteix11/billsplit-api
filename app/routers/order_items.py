@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.middleware.auth import require_auth
+from app.middleware.error_handling import safe_error_response
 from app.middleware.rate_limit import limiter
 from app.services import orders as svc
 
@@ -17,7 +18,7 @@ class KitchenStatusBody(BaseModel):
 
 
 class PaymentStatusBody(BaseModel):
-    itemIds: list[str]
+    itemIds: list[str] = Field(max_length=100)
     status: str
 
 
@@ -33,12 +34,12 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
         svc.update_item_kitchen_status(item_id, body.status)
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return JSONResponse(status_code=500, content={"data": None, "error": safe_error_response(e, "update_kitchen_status")})
 
 
 @router.patch("/api/order-items/payment-status")
 @limiter.limit("20/minute")
-def update_payment_status(request: Request, body: PaymentStatusBody):
+def update_payment_status(request: Request, body: PaymentStatusBody, _user_id: str = Depends(require_auth)):
     if not body.itemIds:
         return JSONResponse(status_code=400, content={"data": None, "error": "itemIds[] is required"})
     if body.status not in VALID_PAYMENT_STATUSES:
@@ -50,4 +51,4 @@ def update_payment_status(request: Request, body: PaymentStatusBody):
         svc.update_items_payment_status(body.itemIds, body.status)
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return JSONResponse(status_code=500, content={"data": None, "error": safe_error_response(e, "update_payment_status")})
