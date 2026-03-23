@@ -14,6 +14,8 @@ class Dish(BaseModel):
     is_featured: bool = False
     category_id: Optional[str] = None
     image: Optional[str] = None
+    max_included_choices: Optional[int] = None
+    max_extra_choices: Optional[int] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -32,6 +34,8 @@ class CreateDishBody(BaseModel):
     image: Optional[str] = None
     is_featured: bool = False
     is_available: bool = True
+    max_included_choices: Optional[int] = None
+    max_extra_choices: Optional[int] = None
 
 
 class UpdateDishBody(BaseModel):
@@ -42,6 +46,8 @@ class UpdateDishBody(BaseModel):
     image: Optional[str] = None
     is_featured: Optional[bool] = None
     is_available: Optional[bool] = None
+    max_included_choices: Optional[int] = None
+    max_extra_choices: Optional[int] = None
 
 
 # ── Allergens ───────────────────────────────────────────────────────────────

@@ -118,6 +118,26 @@ def update_item_kitchen_status(item_id: str, status: str) -> None:
     supabase.update("order_items", f"id=eq.{item_id}", {"kitchen_status": status})
 
 
+def auto_close_if_complete(item_id: str) -> None:
+    """Close the order if all its items are both paid and delivered."""
+    # Find which order this item belongs to
+    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
+    if not rows:
+        return
+    order_id = rows[0]["order_id"]
+
+    order = get_order_by_id(order_id)
+    if not order or order.status != "open":
+        return
+
+    all_done = all(
+        i.payment_status == "paid" and i.kitchen_status == "delivered"
+        for i in order.items
+    )
+    if all_done and order.items:
+        close_order(order_id)
+
+
 def update_items_payment_status(item_ids: list[str], status: str) -> None:
     if not item_ids:
         return

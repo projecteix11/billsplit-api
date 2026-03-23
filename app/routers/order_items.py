@@ -31,6 +31,9 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
         )
     try:
         svc.update_item_kitchen_status(item_id, body.status)
+        # Auto-close the order when all items are both paid and delivered
+        if body.status == "delivered":
+            svc.auto_close_if_complete(item_id)
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
