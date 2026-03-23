@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from app.db import supabase
 from app.models import NewOrderItem, Order, OrderItem
+from app.services import dishes as dish_svc
 
 TAX_RATE_ES = 10.0  # Spain restaurant tax rate (%)
 
@@ -74,19 +75,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) ->
         raise RuntimeError("failed to create order")
     order = Order(**inserted[0])
 
-    item_rows = []
-    for item in items:
-        diner_name = item.diner_name if item.diner_name else "Cliente"
-        item_rows.append({
-            "order_id": order.id,
-            "dish_name": item.dish_name,
-            "dish_price": item.dish_price,
-            "quantity": item.quantity,
-            "notes": item.notes,
-            "diner_name": diner_name,
-            "kitchen_status": "pending",
-            "payment_status": "unassigned",
-        })
+    item_rows = _build_item_rows(order.id, items)
 
     supabase.insert("order_items", item_rows, return_result=False)
 
@@ -95,19 +84,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) ->
 
 
 def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
-    item_rows = []
-    for item in items:
-        diner_name = item.diner_name if item.diner_name else "Cliente"
-        item_rows.append({
-            "order_id": order_id,
-            "dish_name": item.dish_name,
-            "dish_price": item.dish_price,
-            "quantity": item.quantity,
-            "notes": item.notes,
-            "diner_name": diner_name,
-            "kitchen_status": "pending",
-            "payment_status": "unassigned",
-        })
+    item_rows = _build_item_rows(order_id, items)
 
     supabase.insert("order_items", item_rows, return_result=False)
 
@@ -128,10 +105,13 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
 
 
 def close_order(order_id: str) -> None:
+    order = get_order_by_id(order_id)
     supabase.update("orders", f"id=eq.{order_id}", {
         "status": "closed",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     })
+    if order:
+        dish_svc.delete_custom_dishes_for_table(order.table_id)
 
 
 def update_item_kitchen_status(item_id: str, status: str) -> None:
@@ -143,3 +123,22 @@ def update_items_payment_status(item_ids: list[str], status: str) -> None:
         return
     in_list = "(" + ",".join(item_ids) + ")"
     supabase.update("order_items", f"id=in.{in_list}", {"payment_status": status})
+
+
+def _build_item_rows(order_id: str, items: list[NewOrderItem]) -> list[dict]:
+    rows = []
+    for item in items:
+        row = {
+            "order_id": order_id,
+            "dish_name": item.dish_name,
+            "dish_price": item.dish_price,
+            "quantity": item.quantity,
+            "notes": item.notes,
+            "diner_name": item.diner_name or "Cliente",
+            "kitchen_status": "pending",
+            "payment_status": "unassigned",
+            "dish_id": item.dish_id or None,
+            "customization": (item.customization.model_dump() if hasattr(item.customization, 'model_dump') else item.customization) if item.customization else None,
+        }
+        rows.append(row)
+    return rows

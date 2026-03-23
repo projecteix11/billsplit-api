@@ -72,12 +72,7 @@ def close_order(request: Request, order_id: str):
 def get_open_order_for_table(table_id: str):
     try:
         order = svc.get_open_order_for_table(table_id)
-        if order is None:
-            return JSONResponse(
-                status_code=404,
-                content={"data": None, "error": "No open order for this table"},
-            )
-        return {"data": order.model_dump(), "error": None}
+        return {"data": order.model_dump() if order else None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 

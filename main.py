@@ -10,7 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.db import supabase
 from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
-from app.routers import dishes, orders, order_items, payments
+from app.routers import daily_menus, dishes, orders, order_items, payments
 
 supabase.init()
 
@@ -27,11 +27,12 @@ cors_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
 # Routers
+app.include_router(daily_menus.router)
 app.include_router(dishes.router)
 app.include_router(orders.router)
 app.include_router(order_items.router)
