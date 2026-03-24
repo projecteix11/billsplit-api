@@ -250,3 +250,29 @@ class Payment(BaseModel):
     total_charged: float
     payment_method: str
     status: str
+
+
+# ---------------------------------------------------------------------------
+# Request bodies
+# ---------------------------------------------------------------------------
+
+class CreateOrderBody(BaseModel):
+    tableId: str
+    tableNumber: int
+    items: list[NewOrderItem]
+
+
+class AddItemsBody(BaseModel):
+    items: list[NewOrderItem]
+
+
+class CreatePaymentBody(BaseModel):
+    orderId: str
+    amount: float
+    method: str
+
+
+class RedsysSignBody(BaseModel):
+    amount: float
+    urlOk: str
+    urlKo: str

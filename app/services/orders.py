@@ -1,5 +1,5 @@
 from __future__ import annotations
-import math
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone
 
 from app.db import supabase
@@ -10,7 +10,7 @@ TAX_RATE_ES = 10.0  # Spain restaurant tax rate (%)
 
 
 def _round2(v: float) -> float:
-    return math.floor(v * 100 + 0.5) / 100
+    return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def _calculate_subtotal(items: list[NewOrderItem]) -> float:

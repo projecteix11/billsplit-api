@@ -1,26 +1,18 @@
 from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
-from app.models import NewOrderItem
+from app.models import CreateOrderBody, AddItemsBody
 from app.services import orders as svc
 
 router = APIRouter()
 
 
-class CreateOrderBody(BaseModel):
-    tableId: str
-    tableNumber: int
-    items: list[NewOrderItem]
-
-
-class AddItemsBody(BaseModel):
-    items: list[NewOrderItem]
-
-
 @router.post("/api/orders", status_code=201)
+@limiter.limit("20/minute")
+def create_order(request: Request, body: CreateOrderBody):
 @limiter.limit("20/minute")
 def create_order(request: Request, body: CreateOrderBody):
     if not body.tableId or not body.tableNumber or not body.items:
@@ -49,6 +41,8 @@ def get_order_by_id(order_id: str):
 @router.post("/api/orders/{order_id}/items")
 @limiter.limit("20/minute")
 def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
+@limiter.limit("20/minute")
+def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
     if not body.items:
         return JSONResponse(status_code=400, content={"data": None, "error": "items[] is required"})
     try:
@@ -59,6 +53,8 @@ def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
 
 
 @router.patch("/api/orders/{order_id}/close")
+@limiter.limit("20/minute")
+def close_order(request: Request, order_id: str):
 @limiter.limit("20/minute")
 def close_order(request: Request, order_id: str):
     try:
