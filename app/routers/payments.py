@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Request
-from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.middleware.rate_limit import limiter
@@ -10,8 +9,6 @@ router = APIRouter()
 
 
 @router.post("/api/payments", status_code=201)
-@limiter.limit("20/minute")
-def create_payment(request: Request, body: CreatePaymentBody):
 @limiter.limit("20/minute")
 def create_payment(request: Request, body: CreatePaymentBody):
     if not body.orderId or not body.amount or not body.method:
@@ -27,8 +24,6 @@ def create_payment(request: Request, body: CreatePaymentBody):
 
 
 @router.post("/api/payments/redsys-sign")
-@limiter.limit("20/minute")
-def redsys_sign(request: Request, body: RedsysSignBody):
 @limiter.limit("20/minute")
 def redsys_sign(request: Request, body: RedsysSignBody):
     if not body.amount or not body.urlOk or not body.urlKo:
