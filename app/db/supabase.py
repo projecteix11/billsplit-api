@@ -68,6 +68,10 @@ def update(table: str, query: str, body):
     _request("PATCH", table, query=query, body=body)
 
 
+def delete(table: str, query: str):
+    _request("DELETE", table, query=query)
+
+
 def verify_token(token: str) -> str:
     resp = _session.get(
         f"{_base_url}/auth/v1/user",
