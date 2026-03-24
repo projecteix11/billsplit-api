@@ -9,6 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.db import supabase
+
 from app.middleware.auth import AuthError, auth_error_handler
 from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
 from app import routers
@@ -19,6 +20,7 @@ app = FastAPI()
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.add_exception_handler(AuthError, auth_error_handler)
+
 app.add_middleware(SlowAPIMiddleware)
 
 # CORS
@@ -29,7 +31,7 @@ cors_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -38,6 +40,7 @@ routers.register(app)
 
 
 @app.get("/api/health")
+@limiter.exempt
 def health():
     return {"status": "ok"}
 
