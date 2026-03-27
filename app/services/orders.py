@@ -79,6 +79,12 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) ->
 
     supabase.insert("order_items", item_rows, return_result=False)
 
+    supabase.update(
+        "restaurant_tables",
+        f"id=eq.{table_id}",
+        {"status": "on-dine", "active_order_id": order.id},
+    )
+
     order.items = []
     return order
 
