@@ -7,11 +7,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import supabase
+from app.logging import client as logging_client
 from app.routers import dishes, orders, order_items, payments
 
 supabase.init()
+logging_client.init()
+
+from app.middleware.request_logging import RequestLoggingMiddleware
 
 app = FastAPI()
+
+# Request logging (canonical log lines)
+app.add_middleware(RequestLoggingMiddleware)
 
 # CORS
 cors_origins = [

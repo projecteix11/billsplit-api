@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
 from app.services import orders as svc
 
@@ -29,6 +30,10 @@ def update_kitchen_status(item_id: str, body: KitchenStatusBody, _user_id: str =
         )
     try:
         svc.update_item_kitchen_status(item_id, body.status)
+        log_event(LogFactory.order_lifecycle(
+            "kitchen_status_changed", "",
+            metadata={"item_id": item_id, "new_status": body.status},
+        ))
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -45,6 +50,10 @@ def update_payment_status(body: PaymentStatusBody):
         )
     try:
         svc.update_items_payment_status(body.itemIds, body.status)
+        log_event(LogFactory.order_lifecycle(
+            "payment_status_changed", "",
+            metadata={"item_ids": body.itemIds, "new_status": body.status},
+        ))
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
