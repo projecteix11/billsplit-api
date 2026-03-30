@@ -1,2 +1,12 @@
 .env
 billsplit-api
+bash.ex*
+**/__pycache__
+.venv
+venv/
+.pytest_cache/
+.git
+.venv/
+__pycache__/
+*.pyc
+*.pyo
