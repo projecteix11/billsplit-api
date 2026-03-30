@@ -15,13 +15,20 @@ This is a Python port of the [Go implementation](https://github.com/projecteix11
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Create virtual environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 3. Configure environment
 
 Copy `.env.example` to `.env` and fill in your values:
 
@@ -42,7 +49,7 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:5174
 PORT=3001
 ```
 
-### 3. Run
+### 4. Run
 
 ```bash
 python main.py
