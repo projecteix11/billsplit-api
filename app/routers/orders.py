@@ -1,29 +1,20 @@
 import traceback
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
-from app.models import NewOrderItem
+from app.middleware.rate_limit import limiter
+from app.models import CreateOrderBody, AddItemsBody
 from app.services import orders as svc
 
 router = APIRouter()
 
 
-class CreateOrderBody(BaseModel):
-    tableId: str
-    tableNumber: int
-    items: list[NewOrderItem]
-
-
-class AddItemsBody(BaseModel):
-    items: list[NewOrderItem]
-
-
 @router.post("/api/orders", status_code=201)
-def create_order(body: CreateOrderBody):
+@limiter.limit("20/minute")
+def create_order(request: Request, body: CreateOrderBody):
     if not body.tableId or not body.tableNumber or not body.items:
         return JSONResponse(
             status_code=400,
@@ -58,7 +49,8 @@ def get_order_by_id(order_id: str):
 
 
 @router.post("/api/orders/{order_id}/items")
-def add_items_to_order(order_id: str, body: AddItemsBody):
+@limiter.limit("20/minute")
+def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
     if not body.items:
         return JSONResponse(status_code=400, content={"data": None, "error": "items[] is required"})
     try:
@@ -73,7 +65,8 @@ def add_items_to_order(order_id: str, body: AddItemsBody):
 
 
 @router.patch("/api/orders/{order_id}/close")
-def close_order(order_id: str):
+@limiter.limit("20/minute")
+def close_order(request: Request, order_id: str):
     try:
         svc.close_order(order_id)
         log_event(LogFactory.order_lifecycle("order_closed", order_id))
@@ -86,12 +79,7 @@ def close_order(order_id: str):
 def get_open_order_for_table(table_id: str):
     try:
         order = svc.get_open_order_for_table(table_id)
-        if order is None:
-            return JSONResponse(
-                status_code=404,
-                content={"data": None, "error": "No open order for this table"},
-            )
-        return {"data": order.model_dump(), "error": None}
+        return {"data": order.model_dump() if order else None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
