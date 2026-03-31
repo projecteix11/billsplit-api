@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.db import supabase
+from app.logging import log_event, LogFactory
 
 PROTECTED_ROUTES = [
     ("GET", "/api/orders"),
@@ -27,6 +28,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if needs_auth:
             header = request.headers.get("Authorization", "")
             if not header.startswith("Bearer "):
+                log_event(LogFactory.auth_event(
+                    "auth_missing_header",
+                    metadata={"path": path, "method": method},
+                ))
                 return JSONResponse(
                     status_code=401,
                     content={"data": None, "error": "Missing or invalid Authorization header"},
@@ -36,6 +41,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 user_id = supabase.verify_token(token)
                 request.state.user_id = user_id
             except Exception:
+                log_event(LogFactory.auth_event(
+                    "auth_token_invalid",
+                    metadata={"path": path, "method": method},
+                ))
                 return JSONResponse(
                     status_code=401,
                     content={"data": None, "error": "Invalid or expired token"},

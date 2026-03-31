@@ -1,6 +1,9 @@
+import traceback
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
 from app.models import CreateOrderBody, AddItemsBody
@@ -19,8 +22,18 @@ def create_order(request: Request, body: CreateOrderBody):
         )
     try:
         order = svc.create_order(body.tableId, body.tableNumber, body.items)
+        log_event(LogFactory.order_lifecycle(
+            "order_created", order.id,
+            table_id=body.tableId,
+            metadata={"table_number": body.tableNumber, "item_count": len(body.items)},
+        ))
         return JSONResponse(status_code=201, content={"data": order.model_dump(), "error": None})
     except Exception as e:
+        log_event(LogFactory.order_lifecycle(
+            "order_create_failed", "",
+            table_id=body.tableId,
+            metadata={"error": str(e), "traceback": traceback.format_exc()[-500:]},
+        ))
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
@@ -42,6 +55,10 @@ def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
         return JSONResponse(status_code=400, content={"data": None, "error": "items[] is required"})
     try:
         svc.add_items_to_order(order_id, body.items)
+        log_event(LogFactory.order_lifecycle(
+            "items_added", order_id,
+            metadata={"item_count": len(body.items)},
+        ))
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -52,6 +69,7 @@ def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
 def close_order(request: Request, order_id: str):
     try:
         svc.close_order(order_id)
+        log_event(LogFactory.order_lifecycle("order_closed", order_id))
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})

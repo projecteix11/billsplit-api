@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
 from app.services import orders as svc
@@ -31,9 +32,10 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
         )
     try:
         svc.update_item_kitchen_status(item_id, body.status)
-        # Auto-close the order when all items are both paid and delivered
-        if body.status == "delivered":
-            svc.auto_close_if_complete(item_id)
+        log_event(LogFactory.order_lifecycle(
+            "kitchen_status_changed", "",
+            metadata={"item_id": item_id, "new_status": body.status},
+        ))
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -51,6 +53,10 @@ def update_payment_status(request: Request, body: PaymentStatusBody):
         )
     try:
         svc.update_items_payment_status(body.itemIds, body.status)
+        log_event(LogFactory.order_lifecycle(
+            "payment_status_changed", "",
+            metadata={"item_ids": body.itemIds, "new_status": body.status},
+        ))
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
