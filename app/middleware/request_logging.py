@@ -15,7 +15,7 @@ from app.logging import log_event, LogFactory
 
 # Routes that are called on every page load — sample to 10 %
 _SAMPLED_ROUTES: set[str] = {"/api/dishes", "/api/categories"}
-_SAMPLE_RATE = 0.1
+_SAMPLE_RATE = 1
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
