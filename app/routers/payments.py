@@ -1,29 +1,19 @@
 import traceback
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
+from app.middleware.rate_limit import limiter
+from app.models import CreatePaymentBody, RedsysSignBody
 from app.logging import log_event, LogFactory
 from app.services import payments as svc
 
 router = APIRouter()
 
 
-class CreatePaymentBody(BaseModel):
-    orderId: str
-    amount: float
-    method: str
-
-
-class RedsysSignBody(BaseModel):
-    amount: float
-    urlOk: str
-    urlKo: str
-
-
 @router.post("/api/payments", status_code=201)
-def create_payment(body: CreatePaymentBody):
+@limiter.limit("20/minute")
+def create_payment(request: Request, body: CreatePaymentBody):
     if not body.orderId or not body.amount or not body.method:
         return JSONResponse(
             status_code=400,
@@ -44,7 +34,8 @@ def create_payment(body: CreatePaymentBody):
 
 
 @router.post("/api/payments/redsys-sign")
-def redsys_sign(body: RedsysSignBody):
+@limiter.limit("20/minute")
+def redsys_sign(request: Request, body: RedsysSignBody):
     if not body.amount or not body.urlOk or not body.urlKo:
         return JSONResponse(
             status_code=400,

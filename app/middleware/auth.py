@@ -19,7 +19,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         needs_auth = (
             (method == "GET" and path == "/api/orders") or
-            (method == "PATCH" and "/kitchen-status" in path)
+            (method == "PATCH" and "/kitchen-status" in path) or
+            (method in ("POST", "PATCH", "DELETE") and path.startswith("/api/dishes")) or
+            (method == "POST" and path == "/api/allergens") or
+            (method in ("POST", "DELETE") and path.startswith("/api/custom-dishes"))
         )
 
         if needs_auth:
@@ -50,16 +53,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class AuthError(Exception):
+    def __init__(self, message: str):
+        self.message = message
+
+
+async def auth_error_handler(_request: Request, exc: AuthError):
+    return JSONResponse(
+        status_code=401,
+        content={"data": None, "error": exc.message},
+    )
+
+
 def require_auth(request: Request) -> str:
     """Dependency that verifies the Bearer token and returns the user ID."""
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Missing or invalid Authorization header",
-        )
+        raise AuthError("Missing or invalid Authorization header")
     token = header[7:]
     try:
         return supabase.verify_token(token)
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise AuthError("Invalid or expired token")

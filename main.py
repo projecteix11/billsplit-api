@@ -5,10 +5,16 @@ load_dotenv(".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.db import supabase
 from app.logging import client as logging_client
 from app.routers import dishes, orders, order_items, payments
+
+from app.middleware.auth import AuthError, auth_error_handler
+from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
+from app import routers
 
 supabase.init()
 logging_client.init()
@@ -19,6 +25,11 @@ app = FastAPI()
 
 # Request logging (canonical log lines)
 app.add_middleware(RequestLoggingMiddleware)
+# app.state.limiter = limiter
+# app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+# app.add_exception_handler(AuthError, auth_error_handler)
+
+# app.add_middleware(SlowAPIMiddleware)
 
 # CORS
 cors_origins = [
@@ -28,18 +39,16 @@ cors_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
 # Routers
-app.include_router(dishes.router)
-app.include_router(orders.router)
-app.include_router(order_items.router)
-app.include_router(payments.router)
+routers.register(app)
 
 
 @app.get("/api/health")
+@limiter.exempt
 def health():
     return {"status": "ok"}
 
