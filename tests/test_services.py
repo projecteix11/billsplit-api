@@ -264,9 +264,13 @@ class TestCreateOrderService:
 class TestCloseOrderService:
     def test_close_order_calls_update_with_closed_status(self):
         from app.services import orders as svc
+        order = make_order(id="order-uuid")
         with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [order]
             mock_sb.update.return_value = None
-            svc.close_order("order-uuid")
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                mock_dish_sb.delete.return_value = None
+                svc.close_order("order-uuid")
 
         call_args = mock_sb.update.call_args
         assert call_args[0][0] == "orders"

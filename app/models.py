@@ -24,6 +24,7 @@ class DishCategory(BaseModel):
     id: str
     name: str
     sort_order: int
+    requires_kitchen: bool = True
 
 
 class CreateDishBody(BaseModel):
@@ -61,11 +62,13 @@ class Allergen(BaseModel):
 class CreateCategoryBody(BaseModel):
     name: str
     sort_order: Optional[int] = 0
+    requires_kitchen: Optional[bool] = True
 
 
 class UpdateCategoryBody(BaseModel):
     name: Optional[str] = None
     sort_order: Optional[int] = None
+    requires_kitchen: Optional[bool] = None
 
 
 class CreateAllergenBody(BaseModel):
@@ -213,10 +216,11 @@ class OrderItem(BaseModel):
     quantity: int
     notes: Optional[str] = None
     diner_name: str
-    kitchen_status: str
+    kitchen_status: Optional[str] = None
     payment_status: str
     dish_id: Optional[str] = None
     customization: Optional[dict] = None
+    category_id: Optional[str] = None
 
 
 class Order(BaseModel):
@@ -240,6 +244,7 @@ class NewOrderItem(BaseModel):
     diner_name: Optional[str] = None
     dish_id: Optional[str] = None
     customization: Optional[dict] = None
+    category_id: Optional[str] = None
 
 
 class Payment(BaseModel):

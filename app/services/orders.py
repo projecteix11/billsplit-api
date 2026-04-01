@@ -25,7 +25,7 @@ def _calculate_tax(subtotal: float) -> float:
     return _round2(subtotal * TAX_RATE_ES / 100)
 
 
-def fetch_orders(status: str) -> list[Order]:
+def fetch_orders(status: str, kitchen_only: bool = False) -> list[Order]:
     query = f"select=*,items:order_items(*)&status=eq.{status}"
     if status == "closed":
         query += "&order=updated_at.desc&limit=100"
@@ -33,7 +33,15 @@ def fetch_orders(status: str) -> list[Order]:
         query += "&order=created_at.asc&limit=1000"
 
     rows = supabase.select("orders", query)
-    return [Order(**row) for row in rows]
+    orders = [Order(**row) for row in rows]
+
+    if kitchen_only:
+        for order in orders:
+            order.items = [item for item in order.items if item.kitchen_status is not None]
+        # Drop orders with no kitchen items
+        orders = [o for o in orders if o.items]
+
+    return orders
 
 
 def get_order_by_id(order_id: str) -> Order | None:
@@ -137,7 +145,7 @@ def auto_close_if_complete(item_id: str) -> None:
         return
 
     all_done = all(
-        i.payment_status == "paid" and i.kitchen_status == "delivered"
+        i.payment_status == "paid" and (i.kitchen_status is None or i.kitchen_status == "delivered")
         for i in order.items
     )
     if all_done and order.items:
@@ -192,9 +200,28 @@ def update_items_payment_status(item_ids: list[str], status: str) -> None:
     supabase.update("order_items", f"id=in.{in_list}", {"payment_status": status})
 
 
+def _lookup_requires_kitchen(category_ids: set[str]) -> dict[str, bool]:
+    """Batch-fetch requires_kitchen for a set of category IDs."""
+    if not category_ids:
+        return {}
+    ids_csv = ",".join(category_ids)
+    rows = supabase.select("categories", f"id=in.({ids_csv})&select=id,requires_kitchen")
+    return {row["id"]: row["requires_kitchen"] for row in rows}
+
+
 def _build_item_rows(order_id: str, items: list[NewOrderItem]) -> list[dict]:
+    # Batch-fetch requires_kitchen for all items with a category_id
+    unique_cat_ids = {item.category_id for item in items if item.category_id}
+    kitchen_map = _lookup_requires_kitchen(unique_cat_ids)
+
     rows = []
     for item in items:
+        # Determine kitchen_status based on category's requires_kitchen flag
+        if item.category_id and item.category_id in kitchen_map:
+            kitchen_status = "pending" if kitchen_map[item.category_id] else None
+        else:
+            kitchen_status = "pending"
+
         row = {
             "order_id": order_id,
             "dish_name": item.dish_name,
@@ -202,9 +229,10 @@ def _build_item_rows(order_id: str, items: list[NewOrderItem]) -> list[dict]:
             "quantity": item.quantity,
             "notes": item.notes,
             "diner_name": item.diner_name or "Cliente",
-            "kitchen_status": "pending",
+            "kitchen_status": kitchen_status,
             "payment_status": "unassigned",
             "dish_id": item.dish_id or None,
+            "category_id": item.category_id or None,
             "customization": (item.customization.model_dump() if hasattr(item.customization, 'model_dump') else item.customization) if item.customization else None,
         }
         rows.append(row)

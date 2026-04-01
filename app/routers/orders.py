@@ -85,14 +85,14 @@ def get_open_order_for_table(table_id: str):
 
 
 @router.get("/api/orders")
-def list_orders(status: str = "open", _user_id: str = Depends(require_auth)):
+def list_orders(status: str = "open", kitchen_only: bool = False, _user_id: str = Depends(require_auth)):
     if status not in ("open", "closed"):
         return JSONResponse(
             status_code=400,
             content={"data": None, "error": "status must be open or closed"},
         )
     try:
-        orders = svc.fetch_orders(status)
+        orders = svc.fetch_orders(status, kitchen_only=kitchen_only)
         return {"data": [o.model_dump() for o in orders], "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})

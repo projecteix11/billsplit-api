@@ -39,6 +39,7 @@ def make_category(**overrides) -> dict:
         "id": "cat-1",
         "name": "Pizzas",
         "sort_order": 1,
+        "requires_kitchen": True,
     }
     return {**base, **overrides}
 

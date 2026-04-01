@@ -69,7 +69,13 @@ class TestGetDishes:
             mock_sb.select.return_value = []
             client.get("/api/dishes")
 
-        mock_sb.select.assert_called_once_with("dishes", "is_available=eq.true&order=name")
+        mock_sb.select.assert_called_once_with(
+            "dishes",
+            "select=*,allergens:dish_allergens(allergen:allergens(id,name,icon))"
+            ",ingredients:dish_ingredients(id,ingredient_id,present,sort_order"
+            ",ingredient:ingredients(id,name,extra_price))"
+            "&is_available=eq.true&order=sort_order,name",
+        )
 
     def test_get_dishes_returns_500_on_service_error(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
@@ -139,7 +145,10 @@ class TestGetCategories:
             mock_sb.select.return_value = []
             client.get("/api/categories")
 
-        mock_sb.select.assert_called_once_with("dish_categories", "order=sort_order")
+        mock_sb.select.assert_called_once_with(
+            "categories",
+            "select=id,name,sort_order,requires_kitchen&is_active=eq.true&order=sort_order",
+        )
 
     def test_get_categories_returns_500_on_error(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
