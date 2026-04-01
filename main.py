@@ -10,7 +10,6 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.db import supabase
 from app.logging import client as logging_client
-from app.routers import dishes, orders, order_items, payments
 
 from app.middleware.auth import AuthError, auth_error_handler
 from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
@@ -25,11 +24,11 @@ app = FastAPI()
 
 # Request logging (canonical log lines)
 app.add_middleware(RequestLoggingMiddleware)
-# app.state.limiter = limiter
-# app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
-# app.add_exception_handler(AuthError, auth_error_handler)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_exception_handler(AuthError, auth_error_handler)
 
-# app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(SlowAPIMiddleware)
 
 # CORS
 cors_origins = [
