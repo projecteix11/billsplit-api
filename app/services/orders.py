@@ -144,6 +144,47 @@ def auto_close_if_complete(item_id: str) -> None:
         close_order(order_id)
 
 
+def _recalculate_order_totals(order_id: str) -> None:
+    """Recalculate and update subtotal, tax_amount, and total for an order."""
+    order = get_order_by_id(order_id)
+    if order is None:
+        return
+
+    subtotal = _calculate_subtotal_from_items(order.items)
+    tax_amount = _calculate_tax(subtotal)
+    total = _round2(subtotal + tax_amount)
+
+    supabase.update("orders", f"id=eq.{order_id}", {
+        "subtotal": subtotal,
+        "tax_amount": tax_amount,
+        "total": total,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+def delete_order_item(item_id: str) -> None:
+    """Delete a single order item and recalculate parent order totals."""
+    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
+    if not rows:
+        raise ValueError(f"order item {item_id} not found")
+    order_id = rows[0]["order_id"]
+
+    supabase.delete("order_items", f"id=eq.{item_id}")
+    _recalculate_order_totals(order_id)
+
+
+def update_order_item_quantity(item_id: str, quantity: int) -> None:
+    """Update the quantity of a single order item and recalculate parent order totals."""
+    supabase.update("order_items", f"id=eq.{item_id}", {"quantity": quantity})
+
+    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
+    if not rows:
+        raise ValueError(f"order item {item_id} not found")
+    order_id = rows[0]["order_id"]
+
+    _recalculate_order_totals(order_id)
+
+
 def update_items_payment_status(item_ids: list[str], status: str) -> None:
     if not item_ids:
         return

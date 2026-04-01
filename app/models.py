@@ -272,6 +272,10 @@ class CreatePaymentBody(BaseModel):
     method: str
 
 
+class UpdateQuantityBody(BaseModel):
+    quantity: int
+
+
 class RedsysSignBody(BaseModel):
     amount: float
     urlOk: str

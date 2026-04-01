@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
+from app.models import UpdateQuantityBody
 from app.services import orders as svc
 
 router = APIRouter()
@@ -56,6 +57,34 @@ def update_payment_status(request: Request, body: PaymentStatusBody):
         log_event(LogFactory.order_lifecycle(
             "payment_status_changed", "",
             metadata={"item_ids": body.itemIds, "new_status": body.status},
+        ))
+        return {"data": None, "error": None}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+
+
+@router.delete("/api/order-items/{item_id}")
+@limiter.limit("20/minute")
+def delete_order_item(request: Request, item_id: str, _user_id: str = Depends(require_auth)):
+    try:
+        svc.delete_order_item(item_id)
+        log_event(LogFactory.order_lifecycle(
+            "order_item_deleted", "",
+            metadata={"item_id": item_id},
+        ))
+        return {"data": None, "error": None}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+
+
+@router.patch("/api/order-items/{item_id}/quantity")
+@limiter.limit("20/minute")
+def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBody, _user_id: str = Depends(require_auth)):
+    try:
+        svc.update_order_item_quantity(item_id, body.quantity)
+        log_event(LogFactory.order_lifecycle(
+            "order_item_quantity_updated", "",
+            metadata={"item_id": item_id, "new_quantity": body.quantity},
         ))
         return {"data": None, "error": None}
     except Exception as e:
