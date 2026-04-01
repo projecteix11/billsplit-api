@@ -113,29 +113,31 @@ def delete_dish(dish_id: str) -> None:
 def get_categories() -> list[DishCategory]:
     rows = supabase.select(
         "categories",
-        "select=id,name,sort_order&is_active=eq.true&order=sort_order",
+        "select=id,name,sort_order,requires_kitchen&is_active=eq.true&order=sort_order",
     )
     return [DishCategory(**row) for row in rows]
 
 
-def create_category(name: str, sort_order: int) -> DishCategory:
+def create_category(name: str, sort_order: int, requires_kitchen: bool = True) -> DishCategory:
     tenant_id = _get_tenant_id()
     inserted = supabase.insert(
         "categories",
-        {"name": name, "sort_order": sort_order, "is_active": True, "tenant_id": tenant_id},
+        {"name": name, "sort_order": sort_order, "is_active": True, "tenant_id": tenant_id, "requires_kitchen": requires_kitchen},
         return_result=True,
     )
     if not inserted:
         raise RuntimeError("failed to create category")
-    return DishCategory(**{k: inserted[0][k] for k in ("id", "name", "sort_order")})
+    return DishCategory(**{k: inserted[0][k] for k in ("id", "name", "sort_order", "requires_kitchen")})
 
 
-def update_category(category_id: str, name: str | None, sort_order: int | None) -> None:
+def update_category(category_id: str, name: str | None, sort_order: int | None, requires_kitchen: bool | None = None) -> None:
     data: dict = {}
     if name is not None:
         data["name"] = name
     if sort_order is not None:
         data["sort_order"] = sort_order
+    if requires_kitchen is not None:
+        data["requires_kitchen"] = requires_kitchen
     if data:
         supabase.update("categories", f"id=eq.{category_id}", data)
 

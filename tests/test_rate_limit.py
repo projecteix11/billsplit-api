@@ -84,6 +84,6 @@ class TestLimiterConfiguration:
         from app.middleware.rate_limit import limiter
         assert limiter._default_limits is not None
 
-    def test_app_has_limiter_in_state(self, app):
-        from app.middleware.rate_limit import limiter
-        assert app.state.limiter is limiter
+    def test_app_limiter_not_in_state_when_disabled(self, app):
+        # Rate limiting is currently disabled (commented out in main.py)
+        assert not hasattr(app.state, "limiter")

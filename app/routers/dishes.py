@@ -93,7 +93,7 @@ def get_categories():
 @limiter.limit("20/minute")
 def create_category(request: Request, body: CreateCategoryBody, _user_id: str = Depends(require_auth)):
     try:
-        category = svc.create_category(body.name, body.sort_order or 0)
+        category = svc.create_category(body.name, body.sort_order or 0, body.requires_kitchen if body.requires_kitchen is not None else True)
         return JSONResponse(status_code=201, content={"data": category.model_dump(), "error": None})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -103,7 +103,7 @@ def create_category(request: Request, body: CreateCategoryBody, _user_id: str = 
 @limiter.limit("20/minute")
 def update_category(request: Request, category_id: str, body: UpdateCategoryBody, _user_id: str = Depends(require_auth)):
     try:
-        svc.update_category(category_id, body.name, body.sort_order)
+        svc.update_category(category_id, body.name, body.sort_order, body.requires_kitchen)
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
