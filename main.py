@@ -33,7 +33,7 @@ app.add_middleware(SlowAPIMiddleware)
 # CORS
 cors_origins = [
     o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(",")
+    for o in os.getenv("CORS_ORIGINS", "http://localhost:4173,http://localhost:5173,http://localhost:5174").split(",")
 ]
 app.add_middleware(
     CORSMiddleware,
