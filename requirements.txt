@@ -3,6 +3,7 @@ uvicorn==0.32.1
 python-dotenv==1.0.1
 requests==2.32.3
 pycryptodome==3.21.0
+axiom-py==0.10.0
 slowapi==0.1.9
 
 # Test dependencies

@@ -5,7 +5,7 @@ Produces dicts matching the Logging API's EventCreate schema.
 
 from typing import Optional
 
-_SOURCE = "api"
+_SOURCE = "🐍 api"
 
 
 class LogFactory:
@@ -18,7 +18,10 @@ class LogFactory:
         duration_ms: float,
         user_id: Optional[str] = None,
         request_id: Optional[str] = None,
+        client_ip: Optional[str] = None,
         metadata: Optional[dict] = None,
+        source: Optional[str] = None,
+        correlation_id: Optional[str] = None,
     ) -> dict:
         level = (
             "error" if status_code >= 500
@@ -32,7 +35,7 @@ class LogFactory:
         return {
             "type": event_type,
             "level": level,
-            "source": _SOURCE,
+            "source": source or _SOURCE,
             "module": "http",
             "action": f"{method} {path} -> {status_code}",
             "http_method": method,
@@ -41,6 +44,8 @@ class LogFactory:
             "duration_ms": round(duration_ms, 2),
             "user_id": user_id,
             "request_id": request_id,
+            "correlation_id": correlation_id,
+            "client_ip": client_ip,
             "metadata": meta,
         }
 
