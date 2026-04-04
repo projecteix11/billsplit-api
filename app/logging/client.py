@@ -1,35 +1,34 @@
-"""Fire-and-forget logging client.
+"""Fire-and-forget logging client using Axiom.
 
-Sends events to the Logging API in a daemon thread so the main request
+Sends events directly to Axiom in a daemon thread so the main request
 is never blocked or failed by logging issues.
 """
 
 import os
 import threading
+from datetime import datetime, timezone
 
-import requests
+import axiom_py
 
-_LOGGING_URL = ""
-_API_KEY = ""
-_TIMEOUT = 5
+_client = None
+_dataset = ""
 
 
 def init() -> None:
-    global _LOGGING_URL, _API_KEY
-    _LOGGING_URL = os.getenv("LOGGING_API_URL", "").rstrip("/")
-    _API_KEY = os.getenv("LOGGING_API_KEY", "")
+    global _client, _dataset
+    token = os.getenv("AXIOM_TOKEN", "")
+    _dataset = os.getenv("AXIOM_DATASET", "gobbly-management")
+    if token:
+        _client = axiom_py.Client(token=token)
 
 
 def _send(event: dict) -> None:
-    if not _LOGGING_URL or not _API_KEY:
+    if not _client:
         return
     try:
-        requests.post(
-            f"{_LOGGING_URL}/api/v1/events/ingest",
-            json=event,
-            headers={"X-API-Key": _API_KEY, "Content-Type": "application/json"},
-            timeout=_TIMEOUT,
-        )
+        if "_time" not in event and "timestamp" not in event:
+            event["_time"] = datetime.now(timezone.utc).isoformat()
+        _client.ingest_events(dataset=_dataset, events=[event])
     except Exception:
         pass  # logging must never break the application
 
