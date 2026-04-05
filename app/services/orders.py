@@ -1,7 +1,6 @@
 from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone
-
 from app.db import supabase
 from app.models import NewOrderItem, Order, OrderItem
 from app.services import dishes as dish_svc
@@ -13,7 +12,10 @@ def _round2(v: float) -> float:
     return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def _calculate_subtotal(items: list[NewOrderItem]) -> float:
+def _calculate_subtotal(items: list[NewOrderItem], resolved_prices: dict[int, float] | None = None) -> float:
+    """Calculate subtotal. If resolved_prices is given, use server-side prices."""
+    if resolved_prices:
+        return sum(resolved_prices.get(idx, i.dish_price) * i.quantity for idx, i in enumerate(items))
     return sum(i.dish_price * i.quantity for i in items)
 
 
@@ -65,7 +67,10 @@ def get_open_order_for_table(table_id: str) -> Order | None:
 
 
 def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) -> Order:
-    subtotal = _calculate_subtotal(items)
+    # Resolve prices server-side before calculating totals
+    precomputed = _resolve_ingredient_customizations(items)
+    resolved_prices = precomputed[0]
+    subtotal = _calculate_subtotal(items, resolved_prices)
     tax_amount = _calculate_tax(subtotal)
     total = _round2(subtotal + tax_amount)
 
@@ -83,9 +88,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) ->
         raise RuntimeError("failed to create order")
     order = Order(**inserted[0])
 
-    item_rows = _build_item_rows(order.id, items)
-
-    supabase.insert("order_items", item_rows, return_result=False)
+    _build_and_insert_items(order.id, items, precomputed=precomputed)
 
     supabase.update(
         "restaurant_tables",
@@ -98,9 +101,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) ->
 
 
 def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
-    item_rows = _build_item_rows(order_id, items)
-
-    supabase.insert("order_items", item_rows, return_result=False)
+    _build_and_insert_items(order_id, items)
 
     existing = get_order_by_id(order_id)
     if existing is None:
@@ -209,23 +210,153 @@ def _lookup_requires_kitchen(category_ids: set[str]) -> dict[str, bool]:
     return {row["id"]: row["requires_kitchen"] for row in rows}
 
 
-def _build_item_rows(order_id: str, items: list[NewOrderItem]) -> list[dict]:
+def _resolve_ingredient_customizations(
+    items: list[NewOrderItem],
+) -> tuple[dict[int, float], dict[int, list[dict]]]:
+    """Validate customizations and resolve server-side prices.
+
+    Returns:
+        resolved_prices: {item_index: unit_price} for items with dish_id
+        ingredient_rows: {item_index: [row_dicts for order_item_ingredients]}
+    """
+    resolved_prices: dict[int, float] = {}
+    ingredient_rows: dict[int, list[dict]] = {}
+
+    # Collect all dish_ids that need price lookup
+    dish_ids = {item.dish_id for item in items if item.dish_id}
+    if not dish_ids:
+        return resolved_prices, ingredient_rows
+
+    # Batch-fetch dish base prices
+    dish_prices: dict[str, float] = {}
+    dish_max_extras: dict[str, int | None] = {}
+    for did in dish_ids:
+        rows = supabase.select("dishes", f"select=id,price,max_extra_choices&id=eq.{did}&limit=1")
+        if rows:
+            dish_prices[did] = float(rows[0]["price"])
+            dish_max_extras[did] = rows[0].get("max_extra_choices")
+
+    # Process each item
+    for idx, item in enumerate(items):
+        if not item.dish_id or item.dish_id not in dish_prices:
+            continue
+
+        base_price = dish_prices[item.dish_id]
+        cust = item.customization
+        if not cust or (not cust.get("added_ingredients") and not cust.get("removed_ingredients")):
+            # No customization — still use server-side base price
+            resolved_prices[idx] = base_price
+            continue
+
+        added = cust.get("added_ingredients") or []
+        removed = cust.get("removed_ingredients") or []
+
+        # Validate max_extra_choices
+        max_extras = dish_max_extras.get(item.dish_id)
+        if max_extras is not None and len(added) > max_extras:
+            raise ValueError(
+                f"dish {item.dish_id}: max {max_extras} extra ingredients allowed, got {len(added)}"
+            )
+
+        # Fetch dish_ingredients for validation
+        di_rows = supabase.select(
+            "dish_ingredients",
+            f"select=ingredient_id,present&dish_id=eq.{item.dish_id}",
+        )
+        dish_ingredient_map: dict[str, bool] = {
+            r["ingredient_id"]: r["present"] for r in di_rows
+        }
+
+        # Validate and resolve added ingredients
+        extra_total = 0.0
+        item_ing_rows: list[dict] = []
+
+        if added:
+            added_ids = [a["ingredient_id"] for a in added]
+            ids_csv = ",".join(added_ids)
+            ing_rows = supabase.select(
+                "ingredients",
+                f"select=id,extra_price&id=in.({ids_csv})",
+            )
+            ing_price_map = {r["id"]: float(r["extra_price"]) for r in ing_rows}
+
+            for a in added:
+                ing_id = a["ingredient_id"]
+                # Must exist in ingredients table
+                if ing_id not in ing_price_map:
+                    raise ValueError(f"ingredient {ing_id} not found")
+                # Must belong to this dish
+                if ing_id not in dish_ingredient_map:
+                    raise ValueError(
+                        f"ingredient {ing_id} does not belong to dish {item.dish_id}"
+                    )
+                # Must be non-default (present=false)
+                if dish_ingredient_map.get(ing_id, True):
+                    raise ValueError(
+                        f"ingredient {ing_id} is a default ingredient, cannot be added as extra"
+                    )
+
+                real_price = ing_price_map[ing_id]
+                extra_total += real_price
+                item_ing_rows.append({
+                    "ingredient_id": ing_id,
+                    "added": True,
+                    "extra_price": real_price,
+                })
+
+        # Validate removed ingredients
+        for rid in removed:
+            if rid not in dish_ingredient_map:
+                raise ValueError(
+                    f"ingredient {rid} does not belong to dish {item.dish_id}"
+                )
+            if not dish_ingredient_map.get(rid, True):
+                raise ValueError(
+                    f"ingredient {rid} is not a default ingredient, cannot be removed"
+                )
+            item_ing_rows.append({
+                "ingredient_id": rid,
+                "added": False,
+                "extra_price": 0,
+            })
+
+        resolved_prices[idx] = _round2(base_price + extra_total)
+        if item_ing_rows:
+            ingredient_rows[idx] = item_ing_rows
+
+    return resolved_prices, ingredient_rows
+
+
+def _build_and_insert_items(
+    order_id: str,
+    items: list[NewOrderItem],
+    precomputed: tuple[dict[int, float], dict[int, list[dict]]] | None = None,
+) -> None:
+    """Build item rows, insert them, and write order_item_ingredients."""
+    if precomputed:
+        resolved_prices, ingredient_rows = precomputed
+    else:
+        resolved_prices, ingredient_rows = _resolve_ingredient_customizations(items)
+
     # Batch-fetch requires_kitchen for all items with a category_id
     unique_cat_ids = {item.category_id for item in items if item.category_id}
     kitchen_map = _lookup_requires_kitchen(unique_cat_ids)
 
     rows = []
-    for item in items:
+    for idx, item in enumerate(items):
         # Determine kitchen_status based on category's requires_kitchen flag
         if item.category_id and item.category_id in kitchen_map:
             kitchen_status = "pending" if kitchen_map[item.category_id] else None
         else:
             kitchen_status = "pending"
 
+        # Use resolved price if available, otherwise keep frontend price
+        dish_price = resolved_prices.get(idx, item.dish_price)
+
         row = {
             "order_id": order_id,
             "dish_name": item.dish_name,
-            "dish_price": item.dish_price,
+            "dish_price": dish_price,
             "quantity": item.quantity,
             "notes": item.notes,
             "diner_name": item.diner_name or "Cliente",
@@ -236,4 +367,26 @@ def _build_item_rows(order_id: str, items: list[NewOrderItem]) -> list[dict]:
             "customization": (item.customization.model_dump() if hasattr(item.customization, 'model_dump') else item.customization) if item.customization else None,
         }
         rows.append(row)
-    return rows
+
+    # Insert with return to get IDs (needed for ingredient rows)
+    if ingredient_rows:
+        inserted = supabase.insert("order_items", rows, return_result=True)
+        if not inserted:
+            raise RuntimeError("failed to insert order items")
+
+        # Insert order_item_ingredients
+        all_ing_rows: list[dict] = []
+        for idx, ing_list in ingredient_rows.items():
+            order_item_id = inserted[idx]["id"]
+            for ing in ing_list:
+                all_ing_rows.append({
+                    "order_item_id": order_item_id,
+                    "ingredient_id": ing["ingredient_id"],
+                    "added": ing["added"],
+                    "extra_price": ing["extra_price"],
+                })
+
+        if all_ing_rows:
+            supabase.insert("order_item_ingredients", all_ing_rows, return_result=False)
+    else:
+        supabase.insert("order_items", rows, return_result=False)

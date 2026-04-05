@@ -28,6 +28,8 @@ def create_order(request: Request, body: CreateOrderBody):
             metadata={"table_number": body.tableNumber, "item_count": len(body.items)},
         ))
         return JSONResponse(status_code=201, content={"data": order.model_dump(), "error": None})
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"data": None, "error": str(e)})
     except Exception as e:
         log_event(LogFactory.order_lifecycle(
             "order_create_failed", "",
@@ -60,6 +62,8 @@ def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
             metadata={"item_count": len(body.items)},
         ))
         return {"data": None, "error": None}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"data": None, "error": str(e)})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 

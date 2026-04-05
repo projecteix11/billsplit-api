@@ -4,12 +4,13 @@ without going through the HTTP stack.
 
 Tests cover:
 - app/services/dishes.py
-- app/services/orders.py  (math, DB call shapes, edge cases)
+- app/services/orders.py  (math, DB call shapes, edge cases, ingredient customization)
 """
 
 import pytest
-from unittest.mock import patch, call
+from unittest.mock import patch, call, MagicMock
 from tests.conftest import make_dish, make_category, make_order, make_order_item
+from app.models import NewOrderItem
 
 
 # ---------------------------------------------------------------------------
@@ -327,3 +328,328 @@ class TestUpdateItemKitchenStatus:
         assert call_args[0][0] == "order_items"
         assert "item-xyz" in call_args[0][1]
         assert call_args[0][2]["kitchen_status"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# Orders service – _resolve_ingredient_customizations
+# ---------------------------------------------------------------------------
+
+# Helpers for building mock select responses
+DISH_ID = "dish-abc"
+ING_EXTRA_1 = "ing-extra-1"
+ING_EXTRA_2 = "ing-extra-2"
+ING_DEFAULT_1 = "ing-default-1"
+
+
+def _mock_select_for_resolve(table, query):
+    """Route supabase.select calls to return appropriate test data."""
+    if table == "dishes":
+        return [{"id": DISH_ID, "price": 10.0, "max_extra_choices": 2}]
+    if table == "dish_ingredients":
+        return [
+            {"ingredient_id": ING_EXTRA_1, "present": False},
+            {"ingredient_id": ING_EXTRA_2, "present": False},
+            {"ingredient_id": ING_DEFAULT_1, "present": True},
+        ]
+    if table == "ingredients":
+        return [
+            {"id": ING_EXTRA_1, "extra_price": 1.50},
+            {"id": ING_EXTRA_2, "extra_price": 2.00},
+        ]
+    return []
+
+
+class TestResolveIngredientCustomizations:
+    def test_no_dish_id_returns_empty(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(dish_name="Custom", dish_price=5.0, quantity=1)]
+        with patch("app.services.orders.supabase"):
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices == {}
+        assert rows == {}
+
+    def test_no_customization_uses_server_base_price(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(dish_name="Pizza", dish_price=99.0, quantity=1, dish_id=DISH_ID)]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 10.0  # server price, not frontend 99.0
+        assert rows == {}
+
+    def test_added_ingredients_increase_price(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                ],
+                "removed_ingredients": [],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 11.50  # 10.0 + 1.50
+        assert len(rows[0]) == 1
+        assert rows[0][0]["added"] is True
+        assert rows[0][0]["extra_price"] == 1.50
+
+    def test_multiple_extras_summed(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                    {"ingredient_id": ING_EXTRA_2, "name": "Cheese", "extra_price": 2.00},
+                ],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 13.50  # 10.0 + 1.50 + 2.00
+
+    def test_removed_ingredients_do_not_change_price(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [],
+                "removed_ingredients": [ING_DEFAULT_1],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 10.0
+        assert len(rows[0]) == 1
+        assert rows[0][0]["added"] is False
+        assert rows[0][0]["extra_price"] == 0
+
+    def test_uses_server_extra_price_not_frontend(self):
+        """Frontend sends extra_price=0.01 but server has 1.50 — server wins."""
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 0.01},
+                ],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 11.50  # uses server 1.50, not frontend 0.01
+        assert rows[0][0]["extra_price"] == 1.50
+
+    def test_max_extra_choices_exceeded_raises(self):
+        from app.services.orders import _resolve_ingredient_customizations
+
+        def mock_select_max1(table, query):
+            if table == "dishes":
+                return [{"id": DISH_ID, "price": 10.0, "max_extra_choices": 1}]
+            return _mock_select_for_resolve(table, query)
+
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                    {"ingredient_id": ING_EXTRA_2, "name": "Cheese", "extra_price": 2.00},
+                ],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = mock_select_max1
+            with pytest.raises(ValueError, match="max 1 extra ingredients"):
+                _resolve_ingredient_customizations(items)
+
+    def test_ingredient_not_found_raises(self):
+        from app.services.orders import _resolve_ingredient_customizations
+
+        def mock_select_missing(table, query):
+            if table == "ingredients":
+                return []  # ingredient not in DB
+            return _mock_select_for_resolve(table, query)
+
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                ],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = mock_select_missing
+            with pytest.raises(ValueError, match="not found"):
+                _resolve_ingredient_customizations(items)
+
+    def test_ingredient_not_belonging_to_dish_raises(self):
+        from app.services.orders import _resolve_ingredient_customizations
+
+        def mock_select_no_junction(table, query):
+            if table == "dish_ingredients":
+                return []  # no junction rows
+            if table == "ingredients":
+                return [{"id": ING_EXTRA_1, "extra_price": 1.50}]
+            return _mock_select_for_resolve(table, query)
+
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                ],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = mock_select_no_junction
+            with pytest.raises(ValueError, match="does not belong"):
+                _resolve_ingredient_customizations(items)
+
+    def test_adding_default_ingredient_raises(self):
+        """Cannot add an ingredient that is already default (present=true)."""
+        from app.services.orders import _resolve_ingredient_customizations
+
+        def mock_select_default_as_extra(table, query):
+            if table == "ingredients":
+                return [{"id": ING_DEFAULT_1, "extra_price": 0}]
+            return _mock_select_for_resolve(table, query)
+
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_DEFAULT_1, "name": "Tomato", "extra_price": 0},
+                ],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = mock_select_default_as_extra
+            with pytest.raises(ValueError, match="default ingredient"):
+                _resolve_ingredient_customizations(items)
+
+    def test_removing_non_default_ingredient_raises(self):
+        """Cannot remove an ingredient that is not default (present=false)."""
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "removed_ingredients": [ING_EXTRA_1],
+            },
+        )]
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            with pytest.raises(ValueError, match="not a default ingredient"):
+                _resolve_ingredient_customizations(items)
+
+
+# ---------------------------------------------------------------------------
+# Orders service – _build_and_insert_items with ingredients
+# ---------------------------------------------------------------------------
+
+class TestBuildAndInsertItemsWithIngredients:
+    def test_inserts_order_item_ingredients_when_customization_present(self):
+        from app.services.orders import _build_and_insert_items
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                ],
+                "removed_ingredients": [ING_DEFAULT_1],
+            },
+        )]
+
+        inserted_items = [{"id": "oi-1", "order_id": "order-1"}]
+        captured_ing_rows = []
+
+        def fake_insert(table, body, return_result=True):
+            if table == "order_items":
+                return inserted_items
+            if table == "order_item_ingredients":
+                captured_ing_rows.extend(body if isinstance(body, list) else [body])
+                return None
+            return None
+
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            mock_sb.insert.side_effect = fake_insert
+            _build_and_insert_items("order-1", items)
+
+        assert len(captured_ing_rows) == 2
+        added_row = next(r for r in captured_ing_rows if r["added"] is True)
+        removed_row = next(r for r in captured_ing_rows if r["added"] is False)
+        assert added_row["order_item_id"] == "oi-1"
+        assert added_row["ingredient_id"] == ING_EXTRA_1
+        assert added_row["extra_price"] == 1.50
+        assert removed_row["order_item_id"] == "oi-1"
+        assert removed_row["ingredient_id"] == ING_DEFAULT_1
+        assert removed_row["extra_price"] == 0
+
+    def test_no_customization_skips_ingredient_insert(self):
+        from app.services.orders import _build_and_insert_items
+        items = [NewOrderItem(dish_name="Custom dish", dish_price=5.0, quantity=1)]
+
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            mock_sb.insert.return_value = None
+            _build_and_insert_items("order-1", items)
+
+        # Should insert order_items without return_result (no ingredient rows needed)
+        insert_call = mock_sb.insert.call_args
+        assert insert_call[0][0] == "order_items"
+        assert insert_call[1].get("return_result", True) is False
+
+    def test_dish_price_uses_resolved_server_price(self):
+        from app.services.orders import _build_and_insert_items
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=99.99, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                ],
+            },
+        )]
+        captured_rows = []
+
+        def fake_insert(table, body, return_result=True):
+            if table == "order_items":
+                captured_rows.extend(body if isinstance(body, list) else [body])
+                return [{"id": "oi-1"}]
+            return None
+
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = _mock_select_for_resolve
+            mock_sb.insert.side_effect = fake_insert
+            _build_and_insert_items("order-1", items)
+
+        assert captured_rows[0]["dish_price"] == 11.50  # 10.0 base + 1.50, not 99.99
+
+
+# ---------------------------------------------------------------------------
+# Orders service – _calculate_subtotal with resolved prices
+# ---------------------------------------------------------------------------
+
+class TestCalculateSubtotalWithResolvedPrices:
+    def test_uses_resolved_prices_when_provided(self):
+        from app.services.orders import _calculate_subtotal
+        items = [
+            NewOrderItem(dish_name="A", dish_price=99.0, quantity=2),
+            NewOrderItem(dish_name="B", dish_price=5.0, quantity=1),
+        ]
+        resolved = {0: 11.50}  # only first item resolved
+        result = _calculate_subtotal(items, resolved)
+        assert result == 28.0  # 11.50*2 + 5.0*1
+
+    def test_falls_back_to_frontend_price_when_not_resolved(self):
+        from app.services.orders import _calculate_subtotal
+        items = [NewOrderItem(dish_name="A", dish_price=7.0, quantity=3)]
+        resolved = {}  # empty but truthy would be falsy, test with None
+        result = _calculate_subtotal(items, None)
+        assert result == 21.0
