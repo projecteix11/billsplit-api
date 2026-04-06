@@ -72,6 +72,43 @@ def delete(table: str, query: str):
     _request("DELETE", table, query=query)
 
 
+def create_auth_user(email: str, password: str, user_metadata: dict) -> dict:
+    """Create a user via Supabase Auth Admin API (requires service_role key)."""
+    resp = _session.post(
+        f"{_base_url}/auth/v1/admin/users",
+        json={
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+            "user_metadata": user_metadata,
+        },
+        timeout=10,
+    )
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+            msg = err.get("msg", err.get("message", resp.text))
+        except Exception:
+            msg = resp.text
+        raise RuntimeError(f"failed to create user: {msg}")
+    return resp.json()
+
+
+def delete_auth_user(user_id: str) -> None:
+    """Delete a user via Supabase Auth Admin API (requires service_role key)."""
+    resp = _session.delete(
+        f"{_base_url}/auth/v1/admin/users/{user_id}",
+        timeout=10,
+    )
+    if resp.status_code >= 400:
+        try:
+            err = resp.json()
+            msg = err.get("msg", err.get("message", resp.text))
+        except Exception:
+            msg = resp.text
+        raise RuntimeError(f"failed to delete user: {msg}")
+
+
 def verify_token(token: str) -> str:
     resp = _session.get(
         f"{_base_url}/auth/v1/user",
