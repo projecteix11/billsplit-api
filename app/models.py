@@ -225,6 +225,8 @@ class OrderItem(BaseModel):
     dish_id: Optional[str] = None
     customization: Optional[dict] = None
     category_id: Optional[str] = None
+    original_price: Optional[float] = None
+    price_override_reason: Optional[str] = None
 
 
 class Order(BaseModel):
@@ -249,6 +251,8 @@ class NewOrderItem(BaseModel):
     dish_id: Optional[str] = None
     customization: Optional[dict] = None
     category_id: Optional[str] = None
+    original_price: Optional[float] = None
+    price_override_reason: Optional[str] = None
 
 
 class Payment(BaseModel):
@@ -287,6 +291,7 @@ class UpdateQuantityBody(BaseModel):
 
 class UpdatePriceBody(BaseModel):
     price: float
+    reason: Optional[str] = None
 
 
 class RedsysSignBody(BaseModel):

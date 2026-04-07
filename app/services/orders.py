@@ -194,15 +194,23 @@ def update_order_item_quantity(item_id: str, quantity: int) -> None:
     _recalculate_order_totals(order_id)
 
 
-def update_order_item_price(item_id: str, price: float) -> None:
+def update_order_item_price(item_id: str, price: float, reason: Optional[str] = None) -> None:
     """Update the price of a single order item and recalculate parent order totals."""
-    supabase.update("order_items", f"id=eq.{item_id}", {"dish_price": price})
+    update_data: dict = {"dish_price": price}
 
-    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
+    # Fetch current item to preserve original price on first override
+    rows = supabase.select("order_items", f"select=order_id,dish_price,original_price&id=eq.{item_id}&limit=1")
     if not rows:
         raise ValueError(f"order item {item_id} not found")
-    order_id = rows[0]["order_id"]
 
+    if rows[0].get("original_price") is None:
+        update_data["original_price"] = rows[0]["dish_price"]
+    if reason:
+        update_data["price_override_reason"] = reason
+
+    supabase.update("order_items", f"id=eq.{item_id}", update_data)
+
+    order_id = rows[0]["order_id"]
     _recalculate_order_totals(order_id)
 
 
@@ -253,6 +261,11 @@ def _resolve_ingredient_customizations(
     # Process each item
     for idx, item in enumerate(items):
         if not item.dish_id or item.dish_id not in dish_prices:
+            continue
+
+        # Explicit price override (e.g. habitual customer discount)
+        if item.original_price is not None:
+            resolved_prices[idx] = item.dish_price
             continue
 
         base_price = dish_prices[item.dish_id]
@@ -383,6 +396,8 @@ def _build_and_insert_items(
             "dish_id": item.dish_id or None,
             "category_id": item.category_id or None,
             "customization": (item.customization.model_dump() if hasattr(item.customization, 'model_dump') else item.customization) if item.customization else None,
+            "original_price": item.original_price,
+            "price_override_reason": item.price_override_reason,
         }
         rows.append(row)
 

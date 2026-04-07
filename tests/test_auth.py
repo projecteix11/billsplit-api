@@ -23,22 +23,18 @@ def _auth_headers(token: str = VALID_TOKEN) -> dict:
 # ---------------------------------------------------------------------------
 
 class TestAuthOnListOrders:
-    def test_no_header_returns_500(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
-        # (actualmente comentado junto con rate limiting)
+    def test_no_header_returns_401(self, client: TestClient):
         resp = client.get("/api/orders")
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
-    def test_wrong_scheme_returns_500(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_wrong_scheme_returns_401(self, client: TestClient):
         resp = client.get("/api/orders", headers={"Authorization": "Basic dXNlcjpwYXNz"})
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
-    def test_bearer_but_empty_token_returns_500(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_bearer_but_empty_token_returns_401(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("invalid")):
             resp = client.get("/api/orders", headers={"Authorization": "Bearer "})
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
     def test_valid_token_passes_through(self, client: TestClient):
         with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
@@ -47,16 +43,14 @@ class TestAuthOnListOrders:
                 resp = client.get("/api/orders", headers=_auth_headers())
         assert resp.status_code == 200
 
-    def test_invalid_token_returns_500(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_invalid_token_returns_401(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("expired")):
             resp = client.get("/api/orders", headers=_auth_headers("bad-token"))
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
-    def test_missing_header_returns_500(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_missing_header_returns_401(self, client: TestClient):
         resp = client.get("/api/orders")
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -64,23 +58,21 @@ class TestAuthOnListOrders:
 # ---------------------------------------------------------------------------
 
 class TestAuthOnKitchenStatus:
-    def test_no_header_returns_500(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_no_header_returns_401(self, client: TestClient):
         resp = client.patch(
             "/api/order-items/item-1/kitchen-status",
             json={"status": "ready"},
         )
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
-    def test_invalid_token_returns_500(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_invalid_token_returns_401(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("bad")):
             resp = client.patch(
                 "/api/order-items/item-1/kitchen-status",
                 json={"status": "ready"},
                 headers=_auth_headers("invalid"),
             )
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
     def test_valid_token_allows_update(self, client: TestClient):
         with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):

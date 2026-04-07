@@ -434,22 +434,19 @@ class TestGetOpenOrderForTable:
 # ---------------------------------------------------------------------------
 
 class TestListOrders:
-    def test_list_orders_requires_auth_returns_500_without_token(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_list_orders_requires_auth_returns_401_without_token(self, client: TestClient):
         resp = client.get("/api/orders")
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
-    def test_list_orders_requires_auth_returns_500_with_bad_token(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_list_orders_requires_auth_returns_401_with_bad_token(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("invalid token")):
             resp = client.get("/api/orders", headers={"Authorization": "Bearer bad-token"})
 
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
-    def test_list_orders_returns_500_with_malformed_header(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
+    def test_list_orders_returns_401_with_malformed_header(self, client: TestClient):
         resp = client.get("/api/orders", headers={"Authorization": "Token abc123"})
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
     def test_list_orders_open_returns_200_with_valid_token(self, client: TestClient):
         orders = [make_order(), make_order(id="order-2", table_number=6)]
