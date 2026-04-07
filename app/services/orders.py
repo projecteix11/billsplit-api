@@ -239,14 +239,16 @@ def _resolve_ingredient_customizations(
     if not dish_ids:
         return resolved_prices, ingredient_rows
 
-    # Batch-fetch dish base prices
+    # Batch-fetch dish base prices and variable-price flag
     dish_prices: dict[str, float] = {}
     dish_max_extras: dict[str, int | None] = {}
+    dish_variable_price: dict[str, bool] = {}
     for did in dish_ids:
-        rows = supabase.select("dishes", f"select=id,price,max_extra_choices&id=eq.{did}&limit=1")
+        rows = supabase.select("dishes", f"select=id,price,max_extra_choices,is_variable_price&id=eq.{did}&limit=1")
         if rows:
             dish_prices[did] = float(rows[0]["price"])
             dish_max_extras[did] = rows[0].get("max_extra_choices")
+            dish_variable_price[did] = rows[0].get("is_variable_price", False)
 
     # Process each item
     for idx, item in enumerate(items):
@@ -256,9 +258,9 @@ def _resolve_ingredient_customizations(
         base_price = dish_prices[item.dish_id]
         cust = item.customization
         if not cust or (not cust.get("added_ingredients") and not cust.get("removed_ingredients")):
-            # No customization — use server-side base price, unless frontend
-            # sent a different price (e.g. VARIOS dish with variable pricing)
-            if item.dish_price > 0 and base_price == 0:
+            # No customization — use server-side base price, unless dish
+            # is variable-price (trust frontend price)
+            if dish_variable_price.get(item.dish_id, False):
                 resolved_prices[idx] = item.dish_price
             else:
                 resolved_prices[idx] = base_price

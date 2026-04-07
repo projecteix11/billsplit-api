@@ -16,6 +16,7 @@ class Dish(BaseModel):
     image: Optional[str] = None
     max_included_choices: Optional[int] = None
     max_extra_choices: Optional[int] = None
+    is_variable_price: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -35,6 +36,7 @@ class CreateDishBody(BaseModel):
     image: Optional[str] = None
     is_featured: bool = False
     is_available: bool = True
+    is_variable_price: bool = False
     max_included_choices: Optional[int] = None
     max_extra_choices: Optional[int] = None
 
@@ -47,6 +49,7 @@ class UpdateDishBody(BaseModel):
     image: Optional[str] = None
     is_featured: Optional[bool] = None
     is_available: Optional[bool] = None
+    is_variable_price: Optional[bool] = None
     max_included_choices: Optional[int] = None
     max_extra_choices: Optional[int] = None
 
