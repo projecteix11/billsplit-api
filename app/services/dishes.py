@@ -349,7 +349,7 @@ def _parse_dish_full(row: dict) -> DishFull:
     # ── Remove DB-only fields not in Dish model ──
     for key in [
         "tenant_id", "img_small", "img_medium", "img_thumb", "img_basket",
-        "video_url", "allow_takeaway", "stock", "sort_order", "is_active",
+        "allow_takeaway", "stock", "sort_order", "is_active",
     ]:
         row.pop(key, None)
 
