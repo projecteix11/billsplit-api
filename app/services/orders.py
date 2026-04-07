@@ -194,6 +194,18 @@ def update_order_item_quantity(item_id: str, quantity: int) -> None:
     _recalculate_order_totals(order_id)
 
 
+def update_order_item_price(item_id: str, price: float) -> None:
+    """Update the price of a single order item and recalculate parent order totals."""
+    supabase.update("order_items", f"id=eq.{item_id}", {"dish_price": price})
+
+    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
+    if not rows:
+        raise ValueError(f"order item {item_id} not found")
+    order_id = rows[0]["order_id"]
+
+    _recalculate_order_totals(order_id)
+
+
 def update_items_payment_status(item_ids: list[str], status: str) -> None:
     if not item_ids:
         return
@@ -244,8 +256,12 @@ def _resolve_ingredient_customizations(
         base_price = dish_prices[item.dish_id]
         cust = item.customization
         if not cust or (not cust.get("added_ingredients") and not cust.get("removed_ingredients")):
-            # No customization — still use server-side base price
-            resolved_prices[idx] = base_price
+            # No customization — use server-side base price, unless frontend
+            # sent a different price (e.g. VARIOS dish with variable pricing)
+            if item.dish_price > 0 and base_price == 0:
+                resolved_prices[idx] = item.dish_price
+            else:
+                resolved_prices[idx] = base_price
             continue
 
         added = cust.get("added_ingredients") or []

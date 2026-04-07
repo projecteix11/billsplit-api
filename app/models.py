@@ -281,6 +281,10 @@ class UpdateQuantityBody(BaseModel):
     quantity: int
 
 
+class UpdatePriceBody(BaseModel):
+    price: float
+
+
 class RedsysSignBody(BaseModel):
     amount: float
     urlOk: str
