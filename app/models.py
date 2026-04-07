@@ -14,6 +14,7 @@ class Dish(BaseModel):
     is_featured: bool = False
     category_id: Optional[str] = None
     image: Optional[str] = None
+    video_url: Optional[str] = None
     max_included_choices: Optional[int] = None
     max_extra_choices: Optional[int] = None
     is_variable_price: bool = False
