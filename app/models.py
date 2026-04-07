@@ -292,3 +292,18 @@ class RedsysSignBody(BaseModel):
     amount: float
     urlOk: str
     urlKo: str
+
+
+# ── Staff ──────────────────────────────────────────────────────────────────
+
+class CreateStaffBody(BaseModel):
+    email: str
+    password: str
+    firstName: str
+    lastName: str
+    role: str
+    tenantId: str
+
+
+class DeleteStaffBody(BaseModel):
+    tenantId: str
