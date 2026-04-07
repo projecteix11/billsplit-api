@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
-from app.models import UpdateQuantityBody
+from app.models import UpdateQuantityBody, UpdatePriceBody
 from app.services import orders as svc
 
 router = APIRouter()
@@ -85,6 +85,20 @@ def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBod
         log_event(LogFactory.order_lifecycle(
             "order_item_quantity_updated", "",
             metadata={"item_id": item_id, "new_quantity": body.quantity},
+        ))
+        return {"data": None, "error": None}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+
+
+@router.patch("/api/order-items/{item_id}/price")
+@limiter.limit("20/minute")
+def update_item_price(request: Request, item_id: str, body: UpdatePriceBody, _user_id: str = Depends(require_auth)):
+    try:
+        svc.update_order_item_price(item_id, body.price)
+        log_event(LogFactory.order_lifecycle(
+            "order_item_price_updated", "",
+            metadata={"item_id": item_id, "new_price": body.price},
         ))
         return {"data": None, "error": None}
     except Exception as e:
