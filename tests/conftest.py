@@ -9,8 +9,20 @@ Strategy:
 - Rate-limit state is reset between tests via a fresh limiter storage override.
 """
 
+import sys
 import os
+import types
 import pytest
+
+# Stub out axiom_py BEFORE any app code is imported so the logging module
+# can be loaded without the real axiom-py package being installed.
+if "axiom_py" not in sys.modules:
+    _axiom_stub = types.ModuleType("axiom_py")
+    _axiom_stub.Client = type("Client", (), {  # type: ignore[attr-defined]
+        "__init__": lambda self, **kw: None,
+        "ingest_events": lambda self, **kw: None,
+    })
+    sys.modules["axiom_py"] = _axiom_stub
 
 # Provide dummy env vars BEFORE importing the app so supabase.init() doesn't fail.
 os.environ.setdefault("SUPABASE_URL", "http://test.supabase.local")

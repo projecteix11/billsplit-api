@@ -95,10 +95,10 @@ def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBod
 @limiter.limit("20/minute")
 def update_item_price(request: Request, item_id: str, body: UpdatePriceBody, _user_id: str = Depends(require_auth)):
     try:
-        svc.update_order_item_price(item_id, body.price)
+        svc.update_order_item_price(item_id, body.price, reason=body.reason)
         log_event(LogFactory.order_lifecycle(
             "order_item_price_updated", "",
-            metadata={"item_id": item_id, "new_price": body.price},
+            metadata={"item_id": item_id, "new_price": body.price, "reason": body.reason},
         ))
         return {"data": None, "error": None}
     except Exception as e:

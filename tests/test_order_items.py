@@ -49,31 +49,28 @@ class TestUpdateKitchenStatus:
         assert resp.json() == {"data": None, "error": None}
 
     def test_update_kitchen_status_requires_auth_without_token(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
         resp = client.patch(
             "/api/order-items/item-1/kitchen-status",
             json=self._valid_body,
         )
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
     def test_update_kitchen_status_requires_auth_with_bad_token(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("bad token")):
             resp = client.patch(
                 "/api/order-items/item-1/kitchen-status",
                 json=self._valid_body,
                 headers=_auth_headers("bad-token"),
             )
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
     def test_update_kitchen_status_requires_auth_malformed_header(self, client: TestClient):
-        # TODO: cambiar a 401 cuando se reactive auth_error_handler en main.py
         resp = client.patch(
             "/api/order-items/item-1/kitchen-status",
             json=self._valid_body,
             headers={"Authorization": "Token abc"},
         )
-        assert resp.status_code == 500
+        assert resp.status_code == 401
 
     @pytest.mark.parametrize("status", ["pending", "cooking", "ready", "delivered"])
     def test_update_kitchen_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
