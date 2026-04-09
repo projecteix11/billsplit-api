@@ -331,8 +331,7 @@ def _resolve_ingredient_customizations(
                 extra_total += real_price
                 item_ing_rows.append({
                     "ingredient_id": ing_id,
-                    "added": True,
-                    "extra_price": real_price,
+                    "action": "added",
                 })
 
         # Validate removed ingredients
@@ -347,8 +346,7 @@ def _resolve_ingredient_customizations(
                 )
             item_ing_rows.append({
                 "ingredient_id": rid,
-                "added": False,
-                "extra_price": 0,
+                "action": "removed",
             })
 
         resolved_prices[idx] = _round2(base_price + extra_total)
@@ -415,8 +413,7 @@ def _build_and_insert_items(
                 all_ing_rows.append({
                     "order_item_id": order_item_id,
                     "ingredient_id": ing["ingredient_id"],
-                    "added": ing["added"],
-                    "extra_price": ing["extra_price"],
+                    "action": ing["action"],
                 })
 
         if all_ing_rows:
