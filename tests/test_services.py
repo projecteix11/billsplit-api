@@ -583,14 +583,14 @@ class TestBuildAndInsertItemsWithIngredients:
             _build_and_insert_items("order-1", items)
 
         assert len(captured_ing_rows) == 2
-        added_row = next(r for r in captured_ing_rows if r["added"] is True)
-        removed_row = next(r for r in captured_ing_rows if r["added"] is False)
+        added_row = next(r for r in captured_ing_rows if r["action"] == "added")
+        removed_row = next(r for r in captured_ing_rows if r["action"] == "removed")
         assert added_row["order_item_id"] == "oi-1"
         assert added_row["ingredient_id"] == ING_EXTRA_1
-        assert added_row["extra_price"] == 1.50
+        assert "extra_price" not in added_row
         assert removed_row["order_item_id"] == "oi-1"
         assert removed_row["ingredient_id"] == ING_DEFAULT_1
-        assert removed_row["extra_price"] == 0
+        assert "extra_price" not in removed_row
 
     def test_no_customization_skips_ingredient_insert(self):
         from app.services.orders import _build_and_insert_items
