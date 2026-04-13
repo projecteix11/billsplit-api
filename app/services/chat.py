@@ -92,6 +92,9 @@ SYSTEM_PROMPT = (
     "- NUNCA ofrezcas cerrar el pedido ni la mesa. Tu unico rol es tomar pedidos y consultar el menu. "
     "El cierre lo gestiona el camarero desde el sistema.\n"
     "- Despues de anadir items, responde con lo que se ha anadido y pregunta '¿Algo mas?' de forma natural.\n"
+    "- Cuando crees un pedido (create_order), el resultado incluye un menu_path. "
+    "Incluye el link en tu respuesta asi: [QR:menu_path] para que el cliente pueda escanear el QR y ver el menu. "
+    "Ejemplo: 'Pedido creado para la mesa 3. [QR:/menu/uuid-de-mesa] ¿Algo mas?'\n"
     "- Responde en el mismo idioma que el usuario.\n"
     "- Se conciso y directo.\n"
     "\n"
@@ -101,6 +104,9 @@ SYSTEM_PROMPT = (
     "para obtener la lista de mesas y busca la que tenga ese 'number'. "
     "Usa el campo 'id' (UUID) como table_id para todas las operaciones.\n"
     "- NUNCA pidas al usuario un ID de mesa ni un UUID. Tu resuelves el numero a ID internamente.\n"
+    "- Cuando el usuario diga 'abre la mesa X' o 'abre mesa X', usa get_tables para resolver "
+    "el table_id, luego llama a open_table. El resultado incluye menu_path — "
+    "incluye el link en tu respuesta asi: [QR:menu_path]\n"
     "\n"
     "Resolucion de platos:\n"
     "- Cuando uses get_dish_details, el resultado incluye dish_id, category_id, precio, "
@@ -121,6 +127,21 @@ TOOLS: list[dict[str, Any]] = [
             "name": "get_tables",
             "description": "Get all restaurant tables. Returns array of {id, number, status, active_order_id}. Use 'number' to match what the user says (e.g. 'mesa 1' = number:1) and 'id' as table_id for all other operations.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_table",
+            "description": "Open a table for customers. Returns the menu_path for QR code generation. Use when the user says 'abre la mesa X' or 'abre mesa X'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table_id": {"type": "string", "description": "The table UUID"},
+                    "table_number": {"type": "integer", "description": "The table number"},
+                },
+                "required": ["table_id", "table_number"],
+            },
         },
     },
     {
@@ -228,7 +249,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "create_order",
-            "description": "Create a new order for a table.",
+            "description": "Create a new order for a table. Returns order details including menu_path for the customer QR code.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -377,6 +398,16 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         )
         return rows
 
+    if name == "open_table":
+        table_id = args["table_id"]
+        table_number = args["table_number"]
+        supabase.update(
+            "restaurant_tables",
+            f"id=eq.{table_id}",
+            {"status": "on-dine"},
+        )
+        return {"_refresh": True, "menu_path": f"/menu/{table_id}?num={table_number}", "message": f"Mesa {table_number} abierta"}
+
     if name == "get_menu":
         dishes = dish_svc.get_dishes()
         category_id = args.get("category_id")
@@ -430,7 +461,7 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
     if name == "create_order":
         items = [NewOrderItem(**item) for item in _resolve_category_ids(args["items"])]
         order = order_svc.create_order(args["table_id"], args["table_number"], items)
-        return {"_refresh": True, **order.model_dump()}
+        return {"_refresh": True, "menu_path": f"/menu/{args['table_id']}?num={args['table_number']}", **order.model_dump()}
 
     if name == "add_items_to_order":
         items = [NewOrderItem(**item) for item in _resolve_category_ids(args["items"])]

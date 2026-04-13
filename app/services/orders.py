@@ -221,6 +221,46 @@ def update_items_payment_status(item_ids: list[str], status: str) -> None:
     supabase.update("order_items", f"id=in.{in_list}", {"payment_status": status})
 
 
+def _enrich_customization(cust: dict) -> dict:
+    """Resolve ingredient UUIDs to names in customization for display."""
+    if not cust:
+        return cust
+
+    # Collect all ingredient IDs that need name resolution
+    ids_to_resolve: set[str] = set()
+
+    for added in cust.get("added_ingredients") or []:
+        if isinstance(added, dict) and "ingredient_id" in added and "name" not in added:
+            ids_to_resolve.add(added["ingredient_id"])
+
+    for removed in cust.get("removed_ingredients") or []:
+        if isinstance(removed, str) and len(removed) > 20:  # Looks like UUID
+            ids_to_resolve.add(removed)
+
+    if not ids_to_resolve:
+        return cust
+
+    # Batch-fetch names
+    ids_csv = ",".join(ids_to_resolve)
+    rows = supabase.select("ingredients", f"id=in.({ids_csv})&select=id,name")
+    name_map = {r["id"]: r["name"] for r in rows}
+
+    # Enrich added_ingredients
+    if cust.get("added_ingredients"):
+        for added in cust["added_ingredients"]:
+            if isinstance(added, dict) and "name" not in added:
+                added["name"] = name_map.get(added.get("ingredient_id", ""), "")
+
+    # Enrich removed_ingredients: replace UUIDs with names
+    if cust.get("removed_ingredients"):
+        cust["removed_ingredients"] = [
+            name_map.get(rid, rid) if isinstance(rid, str) and len(rid) > 20 else rid
+            for rid in cust["removed_ingredients"]
+        ]
+
+    return cust
+
+
 def _lookup_requires_kitchen(category_ids: set[str]) -> dict[str, bool]:
     """Batch-fetch requires_kitchen for a set of category IDs."""
     if not category_ids:
@@ -382,6 +422,12 @@ def _build_and_insert_items(
         # Use resolved price if available, otherwise keep frontend price
         dish_price = resolved_prices.get(idx, item.dish_price)
 
+        # Enrich customization with ingredient names for display
+        enriched_cust = None
+        if item.customization:
+            raw_cust = item.customization.model_dump() if hasattr(item.customization, 'model_dump') else item.customization
+            enriched_cust = _enrich_customization(raw_cust)
+
         row = {
             "order_id": order_id,
             "dish_name": item.dish_name,
@@ -393,7 +439,7 @@ def _build_and_insert_items(
             "payment_status": "unassigned",
             "dish_id": item.dish_id or None,
             "category_id": item.category_id or None,
-            "customization": (item.customization.model_dump() if hasattr(item.customization, 'model_dump') else item.customization) if item.customization else None,
+            "customization": enriched_cust,
             "original_price": item.original_price,
             "price_override_reason": item.price_override_reason,
         }
