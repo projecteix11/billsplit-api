@@ -17,6 +17,7 @@ from app.services import orders as order_svc
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "openai/gpt-4.1-mini"
+MODEL2 = "anthropic/claude-haiku-4.5"
 
 
 def _api_key() -> str:
@@ -69,8 +70,17 @@ SYSTEM_PROMPT = (
     "\n"
     "REGLA DE CANTIDADES:\n"
     "Cuando el usuario dice 'un/una/1', la cantidad es 1. 'Dos/2' es 2, etc. "
-    "NUNCA vuelvas a preguntar la cantidad si el usuario ya la indico. "
-    "Ejemplo: 'quiero una nolita y una coca cola' = 1 nolita + 1 coca cola, no preguntes cuantas.\n"
+    "NUNCA vuelvas a preguntar la cantidad si el usuario ya la indico.\n"
+    "\n"
+    "REGLA DE EXTRAS YA ESPECIFICADOS:\n"
+    "Si el usuario ya indica el tamaño o extra en su peticion (ej: 'nolita mida M', "
+    "'burger con extra queso'), NO vuelvas a preguntar por esos extras. "
+    "Verifica con get_dish_details que el extra existe y anadelo directamente.\n"
+    "Solo pregunta por extras si el usuario NO los ha especificado y el plato los tiene.\n"
+    "Si get_dish_details muestra que un plato NO tiene extras ni ingredientes, "
+    "NO inventes tamaños ni opciones. Anadelo directamente.\n"
+    "Si el usuario pide un extra que NO coincide con ninguno de los disponibles en get_dish_details, "
+    "NO lo ignores ni lo inventes. Dile que ese extra no esta disponible y muestrale los extras reales.\n"
     "\n"
     "Reglas:\n"
     "- Si el usuario pide algo fuera del contexto del restaurante, responde amablemente "
@@ -331,6 +341,21 @@ TOOLS: list[dict[str, Any]] = [
 # -- Tool execution ------------------------------------------------------------
 
 
+def _resolve_category_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Resolve category_id from dish_id server-side to avoid FK errors from LLM hallucination."""
+    for item in items:
+        dish_id = item.get("dish_id")
+        if dish_id:
+            rows = supabase.select("dishes", f"id=eq.{dish_id}&select=category_id")
+            if rows:
+                item["category_id"] = rows[0].get("category_id")
+            else:
+                item.pop("category_id", None)
+        else:
+            item.pop("category_id", None)
+    return items
+
+
 def _execute_tool(name: str, args: dict[str, Any]) -> str:
     """Execute a tool call and return the JSON-serialized result."""
     try:
@@ -403,14 +428,14 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         return order.model_dump()
 
     if name == "create_order":
-        items = [NewOrderItem(**item) for item in args["items"]]
+        items = [NewOrderItem(**item) for item in _resolve_category_ids(args["items"])]
         order = order_svc.create_order(args["table_id"], args["table_number"], items)
-        return order.model_dump()
+        return {"_refresh": True, **order.model_dump()}
 
     if name == "add_items_to_order":
-        items = [NewOrderItem(**item) for item in args["items"]]
+        items = [NewOrderItem(**item) for item in _resolve_category_ids(args["items"])]
         order_svc.add_items_to_order(args["order_id"], items)
-        return {"message": "Items added successfully"}
+        return {"_refresh": True, "message": "Items added successfully"}
 
     if name == "update_item_quantity":
         order_svc.update_order_item_quantity(args["item_id"], args["quantity"])
@@ -493,6 +518,15 @@ def stream_chat(
             ))
 
             result = _execute_tool(fn_name, fn_args)
+
+            # Emit refresh event if a write tool modified order/table state
+            try:
+                parsed = json.loads(result)
+                if isinstance(parsed, dict) and parsed.pop("_refresh", False):
+                    result = json.dumps(parsed, ensure_ascii=False, default=str)
+                    yield _sse("order_updated", {})
+            except (json.JSONDecodeError, TypeError):
+                pass
 
             yield _sse("tool_call", {"tool": fn_name, "status": "done"})
 
