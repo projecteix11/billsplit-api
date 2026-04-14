@@ -7,6 +7,7 @@ from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
 from app.models import CreateOrderBody, AddItemsBody
+from app.db import supabase
 from app.services import orders as svc
 
 router = APIRouter()
@@ -75,6 +76,17 @@ def close_order(request: Request, order_id: str):
         svc.close_order(order_id)
         log_event(LogFactory.order_lifecycle("order_closed", order_id))
         return {"data": None, "error": None}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+
+
+@router.get("/api/tables/{table_id}")
+def get_table(table_id: str):
+    try:
+        rows = supabase.select("restaurant_tables", f"id=eq.{table_id}&select=id,number,status,active_order_id")
+        if not rows:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Table not found"})
+        return {"data": rows[0], "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
