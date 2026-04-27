@@ -38,8 +38,9 @@ cors_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=r"https://([a-z0-9-]+\.)?gobbly\.app",
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Request-Id", "X-Client-Type", "X-Correlation-Id"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-Id", "X-Client-Type", "X-Correlation-Id", "X-Tenant-Slug"],
     expose_headers=["X-Request-Id"],
 )
 
