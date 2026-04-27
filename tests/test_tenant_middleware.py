@@ -97,14 +97,14 @@ def mock_tenant_select(monkeypatch):
 
 def test_dishes_without_origin_returns_404(real_tenant_client, mock_tenant_select):
     # No Origin header, no Authorization header → 404
-    resp = real_tenant_client.get("/api/dishes", headers={})
+    resp = real_tenant_client.get("/dishes", headers={})
     assert resp.status_code == 404
 
 
 def test_dishes_with_tenant_origin_resolves(real_tenant_client, mock_tenant_select):
-    with mock.patch("app.services.dishes.get_dishes", return_value=[]) as m:
+    with mock.patch("app.services.dishes.get_all_dishes", return_value=[]) as m:
         resp = real_tenant_client.get(
-            "/api/dishes",
+            "/dishes",
             headers={"Origin": "https://demo.gobbly.app"},
         )
     assert resp.status_code == 200
@@ -113,7 +113,7 @@ def test_dishes_with_tenant_origin_resolves(real_tenant_client, mock_tenant_sele
 
 def test_dishes_with_unknown_origin_returns_404(real_tenant_client, mock_tenant_select):
     resp = real_tenant_client.get(
-        "/api/dishes",
+        "/dishes",
         headers={"Origin": "https://unknown.gobbly.app"},
     )
     assert resp.status_code == 404
@@ -129,7 +129,7 @@ def test_orders_list_with_valid_jwt(real_tenant_client, monkeypatch):
         mock.patch("app.services.orders.fetch_orders", return_value=[]) as m,
     ):
         resp = real_tenant_client.get(
-            "/api/orders",
+            "/orders",
             headers={"Authorization": "Bearer valid-jwt-token"},
         )
     assert resp.status_code == 200
@@ -142,7 +142,7 @@ def test_invalid_jwt_returns_401(real_tenant_client, monkeypatch):
 
     with mock.patch("app.db.supabase.verify_token_full", side_effect=ValueError("bad token")):
         resp = real_tenant_client.get(
-            "/api/dishes",
+            "/dishes",
             headers={"Authorization": "Bearer bad-token"},
         )
     assert resp.status_code == 401

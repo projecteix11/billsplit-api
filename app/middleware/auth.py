@@ -6,8 +6,8 @@ from app.db import supabase
 from app.logging import log_event, LogFactory
 
 PROTECTED_ROUTES = [
-    ("GET", "/api/orders"),
-    ("PATCH", "/api/order-items/"),  # kitchen-status prefix check
+    ("GET", "/orders"),
+    ("PATCH", "/order-items/"),  # kitchen-status prefix check
 ]
 
 
@@ -18,11 +18,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         method = request.method
 
         needs_auth = (
-            (method == "GET" and path == "/api/orders") or
+            (method == "GET" and path == "/orders") or
             (method == "PATCH" and "/kitchen-status" in path) or
-            (method in ("POST", "PATCH", "DELETE") and path.startswith("/api/dishes")) or
-            (method == "POST" and path == "/api/allergens") or
-            (method in ("POST", "DELETE") and path.startswith("/api/custom-dishes"))
+            (method in ("POST", "PATCH", "DELETE") and path.startswith("/dishes")) or
+            (method == "POST" and path == "/allergens") or
+            (method in ("POST", "DELETE") and path.startswith("/custom-dishes"))
         )
 
         if needs_auth:

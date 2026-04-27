@@ -24,7 +24,7 @@ class ChatRequest(BaseModel):
     conversation_history: list[ConversationMessage] = []
 
 
-@router.post("/api/chat")
+@router.post("/chat")
 @limiter.limit("20/minute")
 def chat(
     request: Request,

@@ -48,7 +48,7 @@ class TestCreateOrder:
         order = make_order()
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = [order]
-            resp = client.post("/api/orders", json=self._valid_body)
+            resp = client.post("/orders", json=self._valid_body)
 
         assert resp.status_code == 201
 
@@ -56,7 +56,7 @@ class TestCreateOrder:
         order = make_order()
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = [order]
-            resp = client.post("/api/orders", json=self._valid_body)
+            resp = client.post("/orders", json=self._valid_body)
 
         body = resp.json()
         assert "data" in body
@@ -66,7 +66,7 @@ class TestCreateOrder:
         order = make_order()
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = [order]
-            resp = client.post("/api/orders", json=self._valid_body)
+            resp = client.post("/orders", json=self._valid_body)
 
         data = resp.json()["data"]
         assert data["id"] == "order-1"
@@ -78,7 +78,7 @@ class TestCreateOrder:
         order = make_order()
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = [order]
-            client.post("/api/orders", json=self._valid_body)
+            client.post("/orders", json=self._valid_body)
 
         # First call inserts the order, second inserts items
         assert mock_sb.insert.call_count == 2
@@ -92,7 +92,7 @@ class TestCreateOrder:
         order = make_order(subtotal=25.0, tax_amount=2.5, total=27.5)
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = [order]
-            resp = client.post("/api/orders", json=self._valid_body)
+            resp = client.post("/orders", json=self._valid_body)
 
         data = resp.json()["data"]
         assert data["subtotal"] == 25.0
@@ -111,7 +111,7 @@ class TestCreateOrder:
 
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.side_effect = fake_insert
-            client.post("/api/orders", json=self._valid_body)
+            client.post("/orders", json=self._valid_body)
 
         assert captured_items[0]["diner_name"] == "Cliente"
 
@@ -134,29 +134,29 @@ class TestCreateOrder:
 
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.side_effect = fake_insert
-            client.post("/api/orders", json=body)
+            client.post("/orders", json=body)
 
         assert captured_items[0]["diner_name"] == "Alice"
 
     def test_create_order_missing_table_id_returns_400(self, client: TestClient):
         body = {"tableNumber": 5, "items": [{"dish_name": "X", "dish_price": 1.0, "quantity": 1}]}
-        resp = client.post("/api/orders", json=body)
+        resp = client.post("/orders", json=body)
         assert resp.status_code == 422
 
     def test_create_order_missing_table_number_returns_400(self, client: TestClient):
         body = {"tableId": "t-1", "items": [{"dish_name": "X", "dish_price": 1.0, "quantity": 1}]}
-        resp = client.post("/api/orders", json=body)
+        resp = client.post("/orders", json=body)
         assert resp.status_code == 422
 
     def test_create_order_missing_items_returns_422(self, client: TestClient):
         body = {"tableId": "t-1", "tableNumber": 1}
-        resp = client.post("/api/orders", json=body)
+        resp = client.post("/orders", json=body)
         assert resp.status_code == 422
 
     def test_create_order_empty_items_returns_400(self, client: TestClient):
         body = {"tableId": "t-1", "tableNumber": 1, "items": []}
         with patch("app.services.orders.supabase"):
-            resp = client.post("/api/orders", json=body)
+            resp = client.post("/orders", json=body)
         # Router guard: "items[] is required" if falsy list
         assert resp.status_code == 400
         assert resp.json()["data"] is None
@@ -164,7 +164,7 @@ class TestCreateOrder:
     def test_create_order_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.side_effect = RuntimeError("supabase 500: internal error")
-            resp = client.post("/api/orders", json=self._valid_body)
+            resp = client.post("/orders", json=self._valid_body)
 
         assert resp.status_code == 500
         body = resp.json()
@@ -174,7 +174,7 @@ class TestCreateOrder:
     def test_create_order_returns_500_when_insert_returns_nothing(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = None
-            resp = client.post("/api/orders", json=self._valid_body)
+            resp = client.post("/orders", json=self._valid_body)
 
         assert resp.status_code == 500
 
@@ -188,7 +188,7 @@ class TestGetOrderById:
         order = make_order()
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = [order]
-            resp = client.get("/api/orders/order-1")
+            resp = client.get("/orders/order-1")
 
         assert resp.status_code == 200
 
@@ -196,7 +196,7 @@ class TestGetOrderById:
         order = make_order()
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = [order]
-            resp = client.get("/api/orders/order-1")
+            resp = client.get("/orders/order-1")
 
         body = resp.json()
         assert "data" in body
@@ -206,7 +206,7 @@ class TestGetOrderById:
         order = make_order(items=[make_order_item()])
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = [order]
-            resp = client.get("/api/orders/order-1")
+            resp = client.get("/orders/order-1")
 
         data = resp.json()["data"]
         assert data["id"] == "order-1"
@@ -216,7 +216,7 @@ class TestGetOrderById:
     def test_get_order_by_id_returns_404_when_not_found(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            resp = client.get("/api/orders/nonexistent-order")
+            resp = client.get("/orders/nonexistent-order")
 
         assert resp.status_code == 404
         body = resp.json()
@@ -226,7 +226,7 @@ class TestGetOrderById:
     def test_get_order_by_id_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("network error")
-            resp = client.get("/api/orders/order-1")
+            resp = client.get("/orders/order-1")
 
         assert resp.status_code == 500
         assert resp.json()["data"] is None
@@ -234,7 +234,7 @@ class TestGetOrderById:
     def test_get_order_by_id_queries_correct_table(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            client.get("/api/orders/my-order-id")
+            client.get("/orders/my-order-id")
 
         call_args = mock_sb.select.call_args
         assert call_args[0][0] == "orders"
@@ -257,7 +257,7 @@ class TestAddItemsToOrder:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = None
             mock_sb.select.return_value = [order]
-            resp = client.post("/api/orders/order-1/items", json=self._valid_body)
+            resp = client.post("/orders/order-1/items", json=self._valid_body)
 
         assert resp.status_code == 200
 
@@ -266,7 +266,7 @@ class TestAddItemsToOrder:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = None
             mock_sb.select.return_value = [order]
-            resp = client.post("/api/orders/order-1/items", json=self._valid_body)
+            resp = client.post("/orders/order-1/items", json=self._valid_body)
 
         body = resp.json()
         assert body == {"data": None, "error": None}
@@ -276,26 +276,26 @@ class TestAddItemsToOrder:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.return_value = None
             mock_sb.select.return_value = [order]
-            client.post("/api/orders/order-1/items", json=self._valid_body)
+            client.post("/orders/order-1/items", json=self._valid_body)
 
         mock_sb.insert.assert_called_once()
         mock_sb.update.assert_called_once()
 
     def test_add_items_empty_items_returns_400(self, client: TestClient):
-        resp = client.post("/api/orders/order-1/items", json={"items": []})
+        resp = client.post("/orders/order-1/items", json={"items": []})
         assert resp.status_code == 400
         body = resp.json()
         assert body["data"] is None
         assert "items[]" in body["error"]
 
     def test_add_items_missing_items_key_returns_422(self, client: TestClient):
-        resp = client.post("/api/orders/order-1/items", json={})
+        resp = client.post("/orders/order-1/items", json={})
         assert resp.status_code == 422
 
     def test_add_items_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.side_effect = RuntimeError("insert failed")
-            resp = client.post("/api/orders/order-1/items", json=self._valid_body)
+            resp = client.post("/orders/order-1/items", json=self._valid_body)
 
         assert resp.status_code == 500
         assert resp.json()["data"] is None
@@ -312,7 +312,7 @@ class TestAddItemsToOrder:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.side_effect = fake_insert
             mock_sb.select.return_value = [order]
-            client.post("/api/orders/order-1/items", json=self._valid_body)
+            client.post("/orders/order-1/items", json=self._valid_body)
 
         assert captured[0]["diner_name"] == "Cliente"
 
@@ -328,7 +328,7 @@ class TestAddItemsToOrder:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.insert.side_effect = fake_insert
             mock_sb.select.return_value = [order]
-            client.post("/api/orders/order-1/items", json=self._valid_body)
+            client.post("/orders/order-1/items", json=self._valid_body)
 
         assert captured[0]["kitchen_status"] == "pending"
         assert captured[0]["payment_status"] == "unassigned"
@@ -346,7 +346,7 @@ class TestCloseOrder:
             mock_sb.update.return_value = None
             with patch("app.services.dishes.supabase") as mock_dish_sb:
                 mock_dish_sb.delete.return_value = None
-                resp = client.patch("/api/orders/order-1/close")
+                resp = client.patch("/orders/order-1/close")
 
         assert resp.status_code == 200
 
@@ -357,7 +357,7 @@ class TestCloseOrder:
             mock_sb.update.return_value = None
             with patch("app.services.dishes.supabase") as mock_dish_sb:
                 mock_dish_sb.delete.return_value = None
-                resp = client.patch("/api/orders/order-1/close")
+                resp = client.patch("/orders/order-1/close")
 
         assert resp.json() == {"data": None, "error": None}
 
@@ -368,7 +368,7 @@ class TestCloseOrder:
             mock_sb.update.return_value = None
             with patch("app.services.dishes.supabase") as mock_dish_sb:
                 mock_dish_sb.delete.return_value = None
-                client.patch("/api/orders/order-1/close")
+                client.patch("/orders/order-1/close")
 
         # First update call is the order status change
         call_args = mock_sb.update.call_args_list[0]
@@ -379,7 +379,7 @@ class TestCloseOrder:
     def test_close_order_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("update failed")
-            resp = client.patch("/api/orders/order-1/close")
+            resp = client.patch("/orders/order-1/close")
 
         assert resp.status_code == 500
         assert resp.json()["data"] is None
@@ -394,7 +394,7 @@ class TestGetOpenOrderForTable:
         order = make_order()
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = [order]
-            resp = client.get("/api/tables/table-1/open-order")
+            resp = client.get("/tables/table-1/open-order")
 
         assert resp.status_code == 200
         body = resp.json()
@@ -404,7 +404,7 @@ class TestGetOpenOrderForTable:
     def test_returns_200_with_null_data_when_no_open_order(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            resp = client.get("/api/tables/table-1/open-order")
+            resp = client.get("/tables/table-1/open-order")
 
         assert resp.status_code == 200
         body = resp.json()
@@ -414,7 +414,7 @@ class TestGetOpenOrderForTable:
     def test_queries_with_correct_table_id_and_status(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            client.get("/api/tables/my-table-uuid/open-order")
+            client.get("/tables/my-table-uuid/open-order")
 
         call_args = mock_sb.select.call_args
         query = call_args[0][1]
@@ -424,7 +424,7 @@ class TestGetOpenOrderForTable:
     def test_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("db error")
-            resp = client.get("/api/tables/table-1/open-order")
+            resp = client.get("/tables/table-1/open-order")
 
         assert resp.status_code == 500
 
@@ -435,17 +435,17 @@ class TestGetOpenOrderForTable:
 
 class TestListOrders:
     def test_list_orders_requires_auth_returns_401_without_token(self, client: TestClient):
-        resp = client.get("/api/orders")
+        resp = client.get("/orders")
         assert resp.status_code == 401
 
     def test_list_orders_requires_auth_returns_401_with_bad_token(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("invalid token")):
-            resp = client.get("/api/orders", headers={"Authorization": "Bearer bad-token"})
+            resp = client.get("/orders", headers={"Authorization": "Bearer bad-token"})
 
         assert resp.status_code == 401
 
     def test_list_orders_returns_401_with_malformed_header(self, client: TestClient):
-        resp = client.get("/api/orders", headers={"Authorization": "Token abc123"})
+        resp = client.get("/orders", headers={"Authorization": "Token abc123"})
         assert resp.status_code == 401
 
     def test_list_orders_open_returns_200_with_valid_token(self, client: TestClient):
@@ -454,7 +454,7 @@ class TestListOrders:
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.select.return_value = orders
                 resp = client.get(
-                    "/api/orders",
+                    "/orders",
                     headers=_auth_headers(),
                 )
 
@@ -464,7 +464,7 @@ class TestListOrders:
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.select.return_value = [make_order()]
-                resp = client.get("/api/orders", headers=_auth_headers())
+                resp = client.get("/orders", headers=_auth_headers())
 
         body = resp.json()
         assert "data" in body
@@ -476,7 +476,7 @@ class TestListOrders:
             with patch("app.services.orders._get_tenant_table_ids", return_value=["table-1"]):
                 with patch("app.services.orders.supabase") as mock_sb:
                     mock_sb.select.return_value = []
-                    client.get("/api/orders", headers=_auth_headers())
+                    client.get("/orders", headers=_auth_headers())
 
         query = mock_sb.select.call_args[0][1]
         assert "status=eq.open" in query
@@ -487,7 +487,7 @@ class TestListOrders:
                 with patch("app.services.orders.supabase") as mock_sb:
                     mock_sb.select.return_value = []
                     resp = client.get(
-                        "/api/orders?status=closed",
+                        "/orders?status=closed",
                         headers=_auth_headers(),
                     )
 
@@ -498,7 +498,7 @@ class TestListOrders:
     def test_list_orders_invalid_status_returns_400(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             resp = client.get(
-                "/api/orders?status=invalid",
+                "/orders?status=invalid",
                 headers=_auth_headers(),
             )
 
@@ -511,7 +511,7 @@ class TestListOrders:
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.select.side_effect = RuntimeError("connection refused")
-                resp = client.get("/api/orders", headers=_auth_headers())
+                resp = client.get("/orders", headers=_auth_headers())
 
         assert resp.status_code == 500
         assert resp.json()["data"] is None

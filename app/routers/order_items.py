@@ -23,7 +23,7 @@ class PaymentStatusBody(BaseModel):
     status: str
 
 
-@router.patch("/api/order-items/{item_id}/kitchen-status")
+@router.patch("/order-items/{item_id}/kitchen-status")
 @limiter.limit("20/minute")
 def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth)):
     if body.status not in VALID_KITCHEN_STATUSES:
@@ -42,7 +42,7 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/order-items/payment-status")
+@router.patch("/order-items/payment-status")
 @limiter.limit("20/minute")
 def update_payment_status(request: Request, body: PaymentStatusBody):
     if not body.itemIds:
@@ -63,7 +63,7 @@ def update_payment_status(request: Request, body: PaymentStatusBody):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/order-items/{item_id}")
+@router.delete("/order-items/{item_id}")
 @limiter.limit("20/minute")
 def delete_order_item(request: Request, item_id: str, _user_id: str = Depends(require_auth)):
     try:
@@ -77,7 +77,7 @@ def delete_order_item(request: Request, item_id: str, _user_id: str = Depends(re
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/order-items/{item_id}/quantity")
+@router.patch("/order-items/{item_id}/quantity")
 @limiter.limit("20/minute")
 def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBody, _user_id: str = Depends(require_auth)):
     try:
@@ -91,7 +91,7 @@ def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBod
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/order-items/{item_id}/price")
+@router.patch("/order-items/{item_id}/price")
 @limiter.limit("20/minute")
 def update_item_price(request: Request, item_id: str, body: UpdatePriceBody, _user_id: str = Depends(require_auth)):
     try:

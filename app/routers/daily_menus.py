@@ -20,7 +20,7 @@ router = APIRouter()
 # ── Daily menus ────────────────────────────────────────────────────────────
 
 
-@router.get("/api/daily-menus")
+@router.get("/daily-menus")
 async def get_daily_menus(all: bool = False, tenant_id: str = Depends(get_current_tenant)):
     try:
         if all:
@@ -32,7 +32,7 @@ async def get_daily_menus(all: bool = False, tenant_id: str = Depends(get_curren
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.get("/api/daily-menus/{menu_id}")
+@router.get("/daily-menus/{menu_id}")
 def get_daily_menu(menu_id: str):
     try:
         menu = svc.get_daily_menu_by_id(menu_id)
@@ -43,7 +43,7 @@ def get_daily_menu(menu_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/daily-menus", status_code=201)
+@router.post("/daily-menus", status_code=201)
 @limiter.limit("20/minute")
 async def create_daily_menu(request: Request, body: CreateDailyMenuBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
@@ -53,7 +53,7 @@ async def create_daily_menu(request: Request, body: CreateDailyMenuBody, _user_i
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/daily-menus/{menu_id}")
+@router.patch("/daily-menus/{menu_id}")
 @limiter.limit("30/minute")
 def update_daily_menu(request: Request, menu_id: str, body: UpdateDailyMenuBody, _user_id: str = Depends(require_auth)):
     try:
@@ -64,7 +64,7 @@ def update_daily_menu(request: Request, menu_id: str, body: UpdateDailyMenuBody,
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/daily-menus/{menu_id}")
+@router.delete("/daily-menus/{menu_id}")
 @limiter.limit("20/minute")
 def delete_daily_menu(request: Request, menu_id: str, _user_id: str = Depends(require_auth)):
     try:
@@ -77,7 +77,7 @@ def delete_daily_menu(request: Request, menu_id: str, _user_id: str = Depends(re
 # ── Sections ───────────────────────────────────────────────────────────────
 
 
-@router.post("/api/daily-menus/{menu_id}/sections", status_code=201)
+@router.post("/daily-menus/{menu_id}/sections", status_code=201)
 @limiter.limit("20/minute")
 def create_section(request: Request, menu_id: str, body: CreateDailyMenuSectionBody, _user_id: str = Depends(require_auth)):
     try:
@@ -87,7 +87,7 @@ def create_section(request: Request, menu_id: str, body: CreateDailyMenuSectionB
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/daily-menu-sections/{section_id}")
+@router.patch("/daily-menu-sections/{section_id}")
 @limiter.limit("30/minute")
 def update_section(request: Request, section_id: str, body: UpdateDailyMenuSectionBody, _user_id: str = Depends(require_auth)):
     try:
@@ -97,7 +97,7 @@ def update_section(request: Request, section_id: str, body: UpdateDailyMenuSecti
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/daily-menu-sections/{section_id}")
+@router.delete("/daily-menu-sections/{section_id}")
 @limiter.limit("20/minute")
 def delete_section(request: Request, section_id: str, _user_id: str = Depends(require_auth)):
     try:
@@ -110,7 +110,7 @@ def delete_section(request: Request, section_id: str, _user_id: str = Depends(re
 # ── Items ──────────────────────────────────────────────────────────────────
 
 
-@router.post("/api/daily-menu-sections/{section_id}/items", status_code=201)
+@router.post("/daily-menu-sections/{section_id}/items", status_code=201)
 @limiter.limit("20/minute")
 def create_item(request: Request, section_id: str, body: CreateDailyMenuItemBody, _user_id: str = Depends(require_auth)):
     try:
@@ -120,7 +120,7 @@ def create_item(request: Request, section_id: str, body: CreateDailyMenuItemBody
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/daily-menu-items/{item_id}")
+@router.patch("/daily-menu-items/{item_id}")
 @limiter.limit("30/minute")
 def update_item(request: Request, item_id: str, body: UpdateDailyMenuItemBody, _user_id: str = Depends(require_auth)):
     try:
@@ -130,7 +130,7 @@ def update_item(request: Request, item_id: str, body: UpdateDailyMenuItemBody, _
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/daily-menu-items/{item_id}")
+@router.delete("/daily-menu-items/{item_id}")
 @limiter.limit("20/minute")
 def delete_item(request: Request, item_id: str, _user_id: str = Depends(require_auth)):
     try:

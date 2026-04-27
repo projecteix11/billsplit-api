@@ -24,16 +24,16 @@ def _auth_headers(token: str = VALID_TOKEN) -> dict:
 
 class TestAuthOnListOrders:
     def test_no_header_returns_401(self, client: TestClient):
-        resp = client.get("/api/orders")
+        resp = client.get("/orders")
         assert resp.status_code == 401
 
     def test_wrong_scheme_returns_401(self, client: TestClient):
-        resp = client.get("/api/orders", headers={"Authorization": "Basic dXNlcjpwYXNz"})
+        resp = client.get("/orders", headers={"Authorization": "Basic dXNlcjpwYXNz"})
         assert resp.status_code == 401
 
     def test_bearer_but_empty_token_returns_401(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("invalid")):
-            resp = client.get("/api/orders", headers={"Authorization": "Bearer "})
+            resp = client.get("/orders", headers={"Authorization": "Bearer "})
         assert resp.status_code == 401
 
     def test_valid_token_passes_through(self, client: TestClient):
@@ -41,16 +41,16 @@ class TestAuthOnListOrders:
             with patch("app.services.orders._get_tenant_table_ids", return_value=[]):
                 with patch("app.services.orders.supabase") as mock_sb:
                     mock_sb.select.return_value = []
-                    resp = client.get("/api/orders", headers=_auth_headers())
+                    resp = client.get("/orders", headers=_auth_headers())
         assert resp.status_code == 200
 
     def test_invalid_token_returns_401(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("expired")):
-            resp = client.get("/api/orders", headers=_auth_headers("bad-token"))
+            resp = client.get("/orders", headers=_auth_headers("bad-token"))
         assert resp.status_code == 401
 
     def test_missing_header_returns_401(self, client: TestClient):
-        resp = client.get("/api/orders")
+        resp = client.get("/orders")
         assert resp.status_code == 401
 
 
@@ -61,7 +61,7 @@ class TestAuthOnListOrders:
 class TestAuthOnKitchenStatus:
     def test_no_header_returns_401(self, client: TestClient):
         resp = client.patch(
-            "/api/order-items/item-1/kitchen-status",
+            "/order-items/item-1/kitchen-status",
             json={"status": "ready"},
         )
         assert resp.status_code == 401
@@ -69,7 +69,7 @@ class TestAuthOnKitchenStatus:
     def test_invalid_token_returns_401(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("bad")):
             resp = client.patch(
-                "/api/order-items/item-1/kitchen-status",
+                "/order-items/item-1/kitchen-status",
                 json={"status": "ready"},
                 headers=_auth_headers("invalid"),
             )
@@ -80,7 +80,7 @@ class TestAuthOnKitchenStatus:
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
-                    "/api/order-items/item-1/kitchen-status",
+                    "/order-items/item-1/kitchen-status",
                     json={"status": "cooking"},
                     headers=_auth_headers(),
                 )
@@ -95,26 +95,26 @@ class TestUnprotectedRoutes:
     def test_get_dishes_no_auth_returns_200(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            resp = client.get("/api/dishes")
+            resp = client.get("/dishes")
         assert resp.status_code == 200
 
     def test_get_categories_no_auth_returns_200(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            resp = client.get("/api/categories")
+            resp = client.get("/categories")
         assert resp.status_code == 200
 
     def test_get_order_by_id_no_auth_returns_non_401(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            resp = client.get("/api/orders/some-order")
+            resp = client.get("/orders/some-order")
         assert resp.status_code != 401
 
     def test_payment_status_no_auth_returns_200(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
             resp = client.patch(
-                "/api/order-items/payment-status",
+                "/order-items/payment-status",
                 json={"itemIds": ["i-1"], "status": "paid"},
             )
         assert resp.status_code == 200

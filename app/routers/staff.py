@@ -11,7 +11,7 @@ from app.logging.factory import LogFactory
 router = APIRouter()
 
 
-@router.post("/api/staff", status_code=201)
+@router.post("/staff", status_code=201)
 @limiter.limit("10/minute")
 def create_staff(request: Request, body: CreateStaffBody, user_id: str = Depends(require_auth)):
     try:
@@ -42,7 +42,7 @@ def create_staff(request: Request, body: CreateStaffBody, user_id: str = Depends
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/staff/{staff_user_id}", status_code=200)
+@router.delete("/staff/{staff_user_id}", status_code=200)
 @limiter.limit("10/minute")
 def delete_staff(request: Request, staff_user_id: str, body: DeleteStaffBody, user_id: str = Depends(require_auth)):
     try:

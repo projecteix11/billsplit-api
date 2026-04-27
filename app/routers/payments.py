@@ -11,7 +11,7 @@ from app.services import payments as svc
 router = APIRouter()
 
 
-@router.post("/api/payments", status_code=201)
+@router.post("/payments", status_code=201)
 @limiter.limit("20/minute")
 def create_payment(request: Request, body: CreatePaymentBody):
     if not body.orderId or not body.amount or not body.method:
@@ -33,7 +33,7 @@ def create_payment(request: Request, body: CreatePaymentBody):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/payments/redsys-sign")
+@router.post("/payments/redsys-sign")
 @limiter.limit("20/minute")
 def redsys_sign(request: Request, body: RedsysSignBody):
     if not body.amount or not body.urlOk or not body.urlKo:

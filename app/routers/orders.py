@@ -14,7 +14,7 @@ from app.services import orders as svc
 router = APIRouter()
 
 
-@router.post("/api/orders", status_code=201)
+@router.post("/orders", status_code=201)
 @limiter.limit("20/minute")
 async def create_order(request: Request, body: CreateOrderBody, tenant_id: str = Depends(get_current_tenant)):
     if not body.tableId or not body.tableNumber or not body.items:
@@ -41,7 +41,7 @@ async def create_order(request: Request, body: CreateOrderBody, tenant_id: str =
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.get("/api/orders/{order_id}")
+@router.get("/orders/{order_id}")
 def get_order_by_id(order_id: str):
     try:
         order = svc.get_order_by_id(order_id)
@@ -52,7 +52,7 @@ def get_order_by_id(order_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/orders/{order_id}/items")
+@router.post("/orders/{order_id}/items")
 @limiter.limit("20/minute")
 def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
     if not body.items:
@@ -70,7 +70,7 @@ def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/orders/{order_id}/close")
+@router.patch("/orders/{order_id}/close")
 @limiter.limit("20/minute")
 def close_order(request: Request, order_id: str):
     try:
@@ -81,7 +81,7 @@ def close_order(request: Request, order_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.get("/api/tables/{table_id}")
+@router.get("/tables/{table_id}")
 def get_table(table_id: str):
     try:
         rows = supabase.select("restaurant_tables", f"id=eq.{table_id}&select=id,number,status,active_order_id")
@@ -92,7 +92,7 @@ def get_table(table_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.get("/api/tables/{table_id}/open-order")
+@router.get("/tables/{table_id}/open-order")
 def get_open_order_for_table(table_id: str):
     try:
         order = svc.get_open_order_for_table(table_id)
@@ -101,7 +101,7 @@ def get_open_order_for_table(table_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.get("/api/orders")
+@router.get("/orders")
 async def list_orders(status: str = "open", kitchen_only: bool = False, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     if status not in ("open", "closed"):
         return JSONResponse(

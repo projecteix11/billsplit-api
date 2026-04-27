@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.services.notifications import broadcast_notification
 
-router = APIRouter(prefix="/api/notifications", tags=["notifications"])
+router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 _INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
 

@@ -24,19 +24,16 @@ router = APIRouter()
 # ── Dishes (public: available only / auth: all) ────────────────────────────
 
 
-@router.get("/api/dishes")
-async def get_dishes(all: bool = False, tenant_id: str = Depends(get_current_tenant)):
+@router.get("/dishes")
+async def get_dishes(tenant_id: str = Depends(get_current_tenant)):
     try:
-        if all:
-            data = svc.get_all_dishes(tenant_id)
-        else:
-            data = svc.get_dishes(tenant_id)
+        data = svc.get_all_dishes(tenant_id)
         return {"data": [d.model_dump() for d in data], "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.get("/api/dishes/{dish_id}")
+@router.get("/dishes/{dish_id}")
 def get_dish(dish_id: str):
     try:
         dish = svc.get_dish_by_id(dish_id)
@@ -47,7 +44,7 @@ def get_dish(dish_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/dishes", status_code=201)
+@router.post("/dishes", status_code=201)
 @limiter.limit("20/minute")
 async def create_dish(request: Request, body: CreateDishBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
@@ -57,7 +54,7 @@ async def create_dish(request: Request, body: CreateDishBody, _user_id: str = De
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/dishes/{dish_id}")
+@router.patch("/dishes/{dish_id}")
 @limiter.limit("20/minute")
 def update_dish(request: Request, dish_id: str, body: UpdateDishBody, _user_id: str = Depends(require_auth)):
     try:
@@ -68,7 +65,7 @@ def update_dish(request: Request, dish_id: str, body: UpdateDishBody, _user_id: 
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/dishes/{dish_id}")
+@router.delete("/dishes/{dish_id}")
 @limiter.limit("20/minute")
 def delete_dish(request: Request, dish_id: str, _user_id: str = Depends(require_auth)):
     try:
@@ -81,7 +78,7 @@ def delete_dish(request: Request, dish_id: str, _user_id: str = Depends(require_
 # ── Categories ──────────────────────────────────────────────────────────────
 
 
-@router.get("/api/categories")
+@router.get("/categories")
 async def get_categories(tenant_id: str = Depends(get_current_tenant)):
     try:
         data = svc.get_categories(tenant_id)
@@ -90,7 +87,7 @@ async def get_categories(tenant_id: str = Depends(get_current_tenant)):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/categories", status_code=201)
+@router.post("/categories", status_code=201)
 @limiter.limit("20/minute")
 async def create_category(request: Request, body: CreateCategoryBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
@@ -100,7 +97,7 @@ async def create_category(request: Request, body: CreateCategoryBody, _user_id: 
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/categories/{category_id}")
+@router.patch("/categories/{category_id}")
 @limiter.limit("20/minute")
 def update_category(request: Request, category_id: str, body: UpdateCategoryBody, _user_id: str = Depends(require_auth)):
     try:
@@ -110,7 +107,7 @@ def update_category(request: Request, category_id: str, body: UpdateCategoryBody
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/categories/{category_id}")
+@router.delete("/categories/{category_id}")
 @limiter.limit("20/minute")
 def delete_category(request: Request, category_id: str, _user_id: str = Depends(require_auth)):
     try:
@@ -123,7 +120,7 @@ def delete_category(request: Request, category_id: str, _user_id: str = Depends(
 # ── Allergens ───────────────────────────────────────────────────────────────
 
 
-@router.get("/api/allergens")
+@router.get("/allergens")
 def get_allergens():
     try:
         data = svc.get_allergens()
@@ -132,7 +129,7 @@ def get_allergens():
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/allergens", status_code=201)
+@router.post("/allergens", status_code=201)
 @limiter.limit("20/minute")
 def create_allergen(request: Request, body: CreateAllergenBody, _user_id: str = Depends(require_auth)):
     try:
@@ -142,7 +139,7 @@ def create_allergen(request: Request, body: CreateAllergenBody, _user_id: str = 
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/allergens/{allergen_id}")
+@router.patch("/allergens/{allergen_id}")
 @limiter.limit("30/minute")
 def update_allergen(request: Request, allergen_id: str, body: UpdateAllergenBody, _user_id: str = Depends(require_auth)):
     try:
@@ -152,7 +149,7 @@ def update_allergen(request: Request, allergen_id: str, body: UpdateAllergenBody
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/allergens/{allergen_id}")
+@router.delete("/allergens/{allergen_id}")
 @limiter.limit("20/minute")
 def delete_allergen(request: Request, allergen_id: str, _user_id: str = Depends(require_auth)):
     try:
@@ -169,7 +166,7 @@ class SetDishAllergensBody(BaseModel):
     allergen_ids: list[str]
 
 
-@router.put("/api/dishes/{dish_id}/allergens")
+@router.put("/dishes/{dish_id}/allergens")
 @limiter.limit("20/minute")
 def set_dish_allergens(
     request: Request,
@@ -187,7 +184,7 @@ def set_dish_allergens(
 # ── Dish ingredients ────────────────────────────────────────────────────────
 
 
-@router.get("/api/dishes/{dish_id}/ingredients")
+@router.get("/dishes/{dish_id}/ingredients")
 def get_dish_ingredients(dish_id: str):
     try:
         data = svc.get_dish_ingredients(dish_id)
@@ -196,7 +193,7 @@ def get_dish_ingredients(dish_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/dishes/{dish_id}/ingredients", status_code=201)
+@router.post("/dishes/{dish_id}/ingredients", status_code=201)
 @limiter.limit("20/minute")
 async def create_dish_ingredient(
     request: Request,
@@ -212,7 +209,7 @@ async def create_dish_ingredient(
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.patch("/api/dishes/{dish_id}/ingredients/{ingredient_id}")
+@router.patch("/dishes/{dish_id}/ingredients/{ingredient_id}")
 @limiter.limit("20/minute")
 def update_dish_ingredient(
     request: Request,
@@ -228,7 +225,7 @@ def update_dish_ingredient(
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/dishes/{dish_id}/ingredients/{ingredient_id}")
+@router.delete("/dishes/{dish_id}/ingredients/{ingredient_id}")
 @limiter.limit("20/minute")
 def delete_dish_ingredient(
     request: Request,
@@ -246,7 +243,7 @@ def delete_dish_ingredient(
 # ── Custom dishes ───────────────────────────────────────────────────────────
 
 
-@router.get("/api/tables/{table_id}/custom-dishes")
+@router.get("/tables/{table_id}/custom-dishes")
 def get_custom_dishes_for_table(table_id: str):
     try:
         data = svc.get_custom_dishes_for_table(table_id)
@@ -255,7 +252,7 @@ def get_custom_dishes_for_table(table_id: str):
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/api/custom-dishes", status_code=201)
+@router.post("/custom-dishes", status_code=201)
 @limiter.limit("20/minute")
 def create_custom_dish(
     request: Request,
@@ -269,7 +266,7 @@ def create_custom_dish(
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.delete("/api/custom-dishes/{custom_dish_id}")
+@router.delete("/custom-dishes/{custom_dish_id}")
 @limiter.limit("20/minute")
 def delete_custom_dish(
     request: Request,

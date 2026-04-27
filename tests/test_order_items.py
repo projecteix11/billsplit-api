@@ -29,7 +29,7 @@ class TestUpdateKitchenStatus:
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
-                    "/api/order-items/item-1/kitchen-status",
+                    "/order-items/item-1/kitchen-status",
                     json=self._valid_body,
                     headers=_auth_headers(),
                 )
@@ -41,7 +41,7 @@ class TestUpdateKitchenStatus:
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
-                    "/api/order-items/item-1/kitchen-status",
+                    "/order-items/item-1/kitchen-status",
                     json=self._valid_body,
                     headers=_auth_headers(),
                 )
@@ -50,7 +50,7 @@ class TestUpdateKitchenStatus:
 
     def test_update_kitchen_status_requires_auth_without_token(self, client: TestClient):
         resp = client.patch(
-            "/api/order-items/item-1/kitchen-status",
+            "/order-items/item-1/kitchen-status",
             json=self._valid_body,
         )
         assert resp.status_code == 401
@@ -58,7 +58,7 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_requires_auth_with_bad_token(self, client: TestClient):
         with patch("app.middleware.auth.supabase.verify_token_full", side_effect=ValueError("bad token")):
             resp = client.patch(
-                "/api/order-items/item-1/kitchen-status",
+                "/order-items/item-1/kitchen-status",
                 json=self._valid_body,
                 headers=_auth_headers("bad-token"),
             )
@@ -66,7 +66,7 @@ class TestUpdateKitchenStatus:
 
     def test_update_kitchen_status_requires_auth_malformed_header(self, client: TestClient):
         resp = client.patch(
-            "/api/order-items/item-1/kitchen-status",
+            "/order-items/item-1/kitchen-status",
             json=self._valid_body,
             headers={"Authorization": "Token abc"},
         )
@@ -78,7 +78,7 @@ class TestUpdateKitchenStatus:
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
-                    "/api/order-items/item-1/kitchen-status",
+                    "/order-items/item-1/kitchen-status",
                     json={"status": status},
                     headers=_auth_headers(),
                 )
@@ -88,7 +88,7 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_rejects_invalid_status(self, client: TestClient, bad_status: str):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             resp = client.patch(
-                "/api/order-items/item-1/kitchen-status",
+                "/order-items/item-1/kitchen-status",
                 json={"status": bad_status},
                 headers=_auth_headers(),
             )
@@ -100,7 +100,7 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_missing_status_field_returns_422(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             resp = client.patch(
-                "/api/order-items/item-1/kitchen-status",
+                "/order-items/item-1/kitchen-status",
                 json={},
                 headers=_auth_headers(),
             )
@@ -111,7 +111,7 @@ class TestUpdateKitchenStatus:
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 client.patch(
-                    "/api/order-items/my-item-uuid/kitchen-status",
+                    "/order-items/my-item-uuid/kitchen-status",
                     json={"status": "ready"},
                     headers=_auth_headers(),
                 )
@@ -126,7 +126,7 @@ class TestUpdateKitchenStatus:
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.side_effect = RuntimeError("db failure")
                 resp = client.patch(
-                    "/api/order-items/item-1/kitchen-status",
+                    "/order-items/item-1/kitchen-status",
                     json=self._valid_body,
                     headers=_auth_headers(),
                 )
@@ -145,14 +145,14 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_returns_200(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            resp = client.patch("/api/order-items/payment-status", json=self._valid_body)
+            resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.status_code == 200
 
     def test_update_payment_status_returns_null_data_envelope(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            resp = client.patch("/api/order-items/payment-status", json=self._valid_body)
+            resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.json() == {"data": None, "error": None}
 
@@ -161,7 +161,7 @@ class TestUpdatePaymentStatus:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
             resp = client.patch(
-                "/api/order-items/payment-status",
+                "/order-items/payment-status",
                 json={"itemIds": ["item-1"], "status": status},
             )
         assert resp.status_code == 200
@@ -169,7 +169,7 @@ class TestUpdatePaymentStatus:
     @pytest.mark.parametrize("bad_status", ["done", "refunded", "", "PAID", "pending"])
     def test_update_payment_status_rejects_invalid_status(self, client: TestClient, bad_status: str):
         resp = client.patch(
-            "/api/order-items/payment-status",
+            "/order-items/payment-status",
             json={"itemIds": ["item-1"], "status": bad_status},
         )
         assert resp.status_code == 400
@@ -179,7 +179,7 @@ class TestUpdatePaymentStatus:
 
     def test_update_payment_status_empty_item_ids_returns_400(self, client: TestClient):
         resp = client.patch(
-            "/api/order-items/payment-status",
+            "/order-items/payment-status",
             json={"itemIds": [], "status": "paid"},
         )
         assert resp.status_code == 400
@@ -189,14 +189,14 @@ class TestUpdatePaymentStatus:
 
     def test_update_payment_status_missing_item_ids_returns_422(self, client: TestClient):
         resp = client.patch(
-            "/api/order-items/payment-status",
+            "/order-items/payment-status",
             json={"status": "paid"},
         )
         assert resp.status_code == 422
 
     def test_update_payment_status_missing_status_returns_422(self, client: TestClient):
         resp = client.patch(
-            "/api/order-items/payment-status",
+            "/order-items/payment-status",
             json={"itemIds": ["item-1"]},
         )
         assert resp.status_code == 422
@@ -205,7 +205,7 @@ class TestUpdatePaymentStatus:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
             client.patch(
-                "/api/order-items/payment-status",
+                "/order-items/payment-status",
                 json={"itemIds": ["item-a", "item-b"], "status": "assigned"},
             )
 
@@ -220,14 +220,14 @@ class TestUpdatePaymentStatus:
         """Payment-status endpoint has no auth requirement."""
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            resp = client.patch("/api/order-items/payment-status", json=self._valid_body)
+            resp = client.patch("/order-items/payment-status", json=self._valid_body)
         # No Authorization header, must still succeed
         assert resp.status_code == 200
 
     def test_update_payment_status_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.side_effect = RuntimeError("update error")
-            resp = client.patch("/api/order-items/payment-status", json=self._valid_body)
+            resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.status_code == 500
         assert resp.json()["data"] is None
@@ -236,7 +236,7 @@ class TestUpdatePaymentStatus:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
             resp = client.patch(
-                "/api/order-items/payment-status",
+                "/order-items/payment-status",
                 json={"itemIds": ["single-item-id"], "status": "paid"},
             )
         assert resp.status_code == 200

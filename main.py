@@ -48,7 +48,7 @@ app.add_middleware(
 routers.register(app)
 
 
-@app.get("/api/health")
+@app.get("/health")
 @limiter.exempt
 def health():
     return {"status": "ok"}

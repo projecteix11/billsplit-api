@@ -24,7 +24,7 @@ class TestGetDishes:
         dishes = [make_dish(), make_dish(id="dish-2", name="Pasta Carbonara")]
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = dishes
-            resp = client.get("/api/dishes")
+            resp = client.get("/dishes")
 
         assert resp.status_code == 200
         body = resp.json()
@@ -35,7 +35,7 @@ class TestGetDishes:
         dishes = [make_dish(), make_dish(id="dish-2", name="Pasta Carbonara", price=9.0)]
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = dishes
-            resp = client.get("/api/dishes")
+            resp = client.get("/dishes")
 
         data = resp.json()["data"]
         assert len(data) == 2
@@ -46,7 +46,7 @@ class TestGetDishes:
         dish = make_dish()
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = [dish]
-            resp = client.get("/api/dishes")
+            resp = client.get("/dishes")
 
         item = resp.json()["data"][0]
         assert item["id"] == dish["id"]
@@ -59,7 +59,7 @@ class TestGetDishes:
     def test_get_dishes_returns_empty_list_when_no_dishes(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            resp = client.get("/api/dishes")
+            resp = client.get("/dishes")
 
         assert resp.status_code == 200
         assert resp.json()["data"] == []
@@ -67,19 +67,19 @@ class TestGetDishes:
     def test_get_dishes_queries_correct_table_and_filter(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            client.get("/api/dishes")
+            client.get("/dishes")
 
         call_args = mock_sb.select.call_args
         assert call_args[0][0] == "dishes"
         query = call_args[0][1]
-        assert "is_available=eq.true" in query
+        assert "is_available=eq.true" not in query  # GET /dishes returns all (including unavailable)
         assert "tenant_id=eq." in query
         assert "order=sort_order,name" in query
 
     def test_get_dishes_returns_500_on_service_error(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("supabase 503: service unavailable")
-            resp = client.get("/api/dishes")
+            resp = client.get("/dishes")
 
         assert resp.status_code == 500
         body = resp.json()
@@ -89,7 +89,7 @@ class TestGetDishes:
     def test_get_dishes_error_response_has_correct_envelope(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("DB error")
-            resp = client.get("/api/dishes")
+            resp = client.get("/dishes")
 
         body = resp.json()
         assert "data" in body
@@ -105,7 +105,7 @@ class TestGetCategories:
     def test_get_categories_returns_200_with_data_envelope(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = [make_category()]
-            resp = client.get("/api/categories")
+            resp = client.get("/categories")
 
         assert resp.status_code == 200
         body = resp.json()
@@ -116,7 +116,7 @@ class TestGetCategories:
         cats = [make_category(), make_category(id="cat-2", name="Pastas", sort_order=2)]
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = cats
-            resp = client.get("/api/categories")
+            resp = client.get("/categories")
 
         data = resp.json()["data"]
         assert len(data) == 2
@@ -125,7 +125,7 @@ class TestGetCategories:
         cat = make_category()
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = [cat]
-            resp = client.get("/api/categories")
+            resp = client.get("/categories")
 
         item = resp.json()["data"][0]
         assert item["id"] == cat["id"]
@@ -135,14 +135,14 @@ class TestGetCategories:
     def test_get_categories_returns_empty_list(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            resp = client.get("/api/categories")
+            resp = client.get("/categories")
 
         assert resp.json()["data"] == []
 
     def test_get_categories_queries_correct_table(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            client.get("/api/categories")
+            client.get("/categories")
 
         call_args = mock_sb.select.call_args
         assert call_args[0][0] == "categories"
@@ -154,7 +154,7 @@ class TestGetCategories:
     def test_get_categories_returns_500_on_error(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("connection timeout")
-            resp = client.get("/api/categories")
+            resp = client.get("/categories")
 
         assert resp.status_code == 500
         body = resp.json()

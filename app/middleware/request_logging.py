@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.logging import log_event, LogFactory
 
 # Routes that are called on every page load — sample to 10 %
-_SAMPLED_ROUTES: set[str] = {"/api/dishes", "/api/categories"}
+_SAMPLED_ROUTES: set[str] = {"/dishes", "/categories"}
 _SAMPLE_RATE = 1
 
 

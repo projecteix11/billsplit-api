@@ -16,7 +16,7 @@ class GenerateDescriptionRequest(BaseModel):
     language: str = Field(default="es", pattern="^(es|en|ca)$")
 
 
-@router.post("/api/generate-description")
+@router.post("/generate-description")
 @limiter.limit("10/minute")
 def generate_description(
     request: Request,
