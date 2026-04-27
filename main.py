@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -52,6 +52,12 @@ routers.register(app)
 @limiter.exempt
 def health():
     return {"status": "ok"}
+
+
+@app.get("/debug-headers")
+@limiter.exempt
+def debug_headers(request: Request):
+    return {"headers": dict(request.headers)}
 
 
 if __name__ == "__main__":
