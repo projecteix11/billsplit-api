@@ -29,6 +29,7 @@ os.environ.setdefault("SUPABASE_URL", "http://test.supabase.local")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 
 from fastapi.testclient import TestClient
+from app.middleware.tenant import get_current_tenant
 
 # ---------------------------------------------------------------------------
 # Factories for common model dicts
@@ -109,6 +110,8 @@ def app():
     """Return the FastAPI application, initialised once per test session.
 
     supabase.init() is patched to a no-op so no real network calls occur.
+    get_current_tenant is overridden to return VALID_TENANT_ID so existing
+    route tests don't need an Origin header or JWT.
     """
     import unittest.mock as mock
     with mock.patch("app.db.supabase.init"):
@@ -120,6 +123,7 @@ def app():
         sb._api_key = "test-service-role-key"
 
         from main import app as fastapi_app
+        fastapi_app.dependency_overrides[get_current_tenant] = lambda: VALID_TENANT_ID
         return fastapi_app
 
 
@@ -153,3 +157,4 @@ def reset_rate_limiter():
 
 VALID_TOKEN = "valid-bearer-token"
 VALID_USER_ID = "user-uuid-123"
+VALID_TENANT_ID = "test-tenant-uuid"

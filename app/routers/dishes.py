@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
+from app.middleware.tenant import get_current_tenant
 from app.models import (
     CreateAllergenBody,
     UpdateAllergenBody,
@@ -24,12 +25,12 @@ router = APIRouter()
 
 
 @router.get("/api/dishes")
-def get_dishes(all: bool = False, _user_id: str | None = None):
+async def get_dishes(all: bool = False, tenant_id: str = Depends(get_current_tenant)):
     try:
         if all:
-            data = svc.get_all_dishes()
+            data = svc.get_all_dishes(tenant_id)
         else:
-            data = svc.get_dishes()
+            data = svc.get_dishes(tenant_id)
         return {"data": [d.model_dump() for d in data], "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -48,9 +49,9 @@ def get_dish(dish_id: str):
 
 @router.post("/api/dishes", status_code=201)
 @limiter.limit("20/minute")
-def create_dish(request: Request, body: CreateDishBody, _user_id: str = Depends(require_auth)):
+async def create_dish(request: Request, body: CreateDishBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        dish = svc.create_dish(body)
+        dish = svc.create_dish(body, tenant_id)
         return JSONResponse(status_code=201, content={"data": dish.model_dump(), "error": None})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -81,9 +82,9 @@ def delete_dish(request: Request, dish_id: str, _user_id: str = Depends(require_
 
 
 @router.get("/api/categories")
-def get_categories():
+async def get_categories(tenant_id: str = Depends(get_current_tenant)):
     try:
-        data = svc.get_categories()
+        data = svc.get_categories(tenant_id)
         return {"data": [c.model_dump() for c in data], "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -91,9 +92,9 @@ def get_categories():
 
 @router.post("/api/categories", status_code=201)
 @limiter.limit("20/minute")
-def create_category(request: Request, body: CreateCategoryBody, _user_id: str = Depends(require_auth)):
+async def create_category(request: Request, body: CreateCategoryBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        category = svc.create_category(body.name, body.sort_order or 0, body.requires_kitchen if body.requires_kitchen is not None else True)
+        category = svc.create_category(body.name, body.sort_order or 0, tenant_id, body.requires_kitchen if body.requires_kitchen is not None else True)
         return JSONResponse(status_code=201, content={"data": category.model_dump(), "error": None})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -197,14 +198,15 @@ def get_dish_ingredients(dish_id: str):
 
 @router.post("/api/dishes/{dish_id}/ingredients", status_code=201)
 @limiter.limit("20/minute")
-def create_dish_ingredient(
+async def create_dish_ingredient(
     request: Request,
     dish_id: str,
     body: CreateDishIngredientBody,
     _user_id: str = Depends(require_auth),
+    tenant_id: str = Depends(get_current_tenant),
 ):
     try:
-        ingredient = svc.create_dish_ingredient(dish_id, body)
+        ingredient = svc.create_dish_ingredient(dish_id, body, tenant_id)
         return JSONResponse(status_code=201, content={"data": ingredient.model_dump(), "error": None})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})

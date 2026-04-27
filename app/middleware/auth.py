@@ -38,8 +38,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
             token = header[7:]
             try:
-                user_id = supabase.verify_token(token)
+                user_id, tenant_id = supabase.verify_token_full(token)
                 request.state.user_id = user_id
+                request.state.tenant_id = tenant_id
             except Exception:
                 log_event(LogFactory.auth_event(
                     "auth_token_invalid",
@@ -67,11 +68,18 @@ async def auth_error_handler(_request: Request, exc: AuthError):
 
 def require_auth(request: Request) -> str:
     """Dependency that verifies the Bearer token and returns the user ID."""
+    # Reuse result already stored by AuthMiddleware to avoid a second Supabase call
+    user_id = getattr(request.state, "user_id", None)
+    if user_id:
+        return user_id
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         raise AuthError("Missing or invalid Authorization header")
     token = header[7:]
     try:
-        return supabase.verify_token(token)
+        user_id, tenant_id = supabase.verify_token_full(token)
+        request.state.user_id = user_id
+        request.state.tenant_id = tenant_id
+        return user_id
     except Exception:
         raise AuthError("Invalid or expired token")

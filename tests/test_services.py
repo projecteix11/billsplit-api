@@ -9,7 +9,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import patch, call, MagicMock
-from tests.conftest import make_dish, make_category, make_order, make_order_item
+from tests.conftest import make_dish, make_category, make_order, make_order_item, VALID_TENANT_ID
 from app.models import NewOrderItem
 
 
@@ -23,7 +23,7 @@ class TestDishesService:
         dish_rows = [make_dish(), make_dish(id="d-2", name="Pasta")]
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = dish_rows
-            result = svc.get_dishes()
+            result = svc.get_dishes(VALID_TENANT_ID)
 
         assert len(result) == 2
         assert result[0].name == "Pizza Margherita"
@@ -33,7 +33,7 @@ class TestDishesService:
         from app.services import dishes as svc
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            result = svc.get_dishes()
+            result = svc.get_dishes(VALID_TENANT_ID)
         assert result == []
 
     def test_get_categories_returns_category_objects(self):
@@ -41,7 +41,7 @@ class TestDishesService:
         cats = [make_category(), make_category(id="c-2", name="Pastas", sort_order=2)]
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = cats
-            result = svc.get_categories()
+            result = svc.get_categories(VALID_TENANT_ID)
 
         assert len(result) == 2
         assert result[0].sort_order == 1
@@ -51,7 +51,7 @@ class TestDishesService:
         from app.services import dishes as svc
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
-            result = svc.get_categories()
+            result = svc.get_categories(VALID_TENANT_ID)
         assert result == []
 
 
@@ -121,9 +121,10 @@ class TestOrdersMath:
 class TestFetchOrders:
     def test_fetch_orders_open_queries_correct_fields(self):
         from app.services import orders as svc
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = []
-            svc.fetch_orders("open")
+        with patch("app.services.orders._get_tenant_table_ids", return_value=["table-1"]):
+            with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = []
+                svc.fetch_orders(VALID_TENANT_ID, "open")
 
         call_args = mock_sb.select.call_args
         assert call_args[0][0] == "orders"
@@ -132,9 +133,10 @@ class TestFetchOrders:
 
     def test_fetch_orders_closed_queries_with_desc_order(self):
         from app.services import orders as svc
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = []
-            svc.fetch_orders("closed")
+        with patch("app.services.orders._get_tenant_table_ids", return_value=["table-1"]):
+            with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = []
+                svc.fetch_orders(VALID_TENANT_ID, "closed")
 
         query = mock_sb.select.call_args[0][1]
         assert "status=eq.closed" in query
@@ -143,9 +145,10 @@ class TestFetchOrders:
     def test_fetch_orders_returns_list_of_order_objects(self):
         from app.services import orders as svc
         rows = [make_order(), make_order(id="order-2", table_number=7)]
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = rows
-            result = svc.fetch_orders("open")
+        with patch("app.services.orders._get_tenant_table_ids", return_value=["table-1"]):
+            with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = rows
+                result = svc.fetch_orders(VALID_TENANT_ID, "open")
 
         assert len(result) == 2
         assert result[0].id == "order-1"
@@ -393,8 +396,7 @@ class TestResolveIngredientCustomizations:
             prices, rows = _resolve_ingredient_customizations(items)
         assert prices[0] == 11.50  # 10.0 + 1.50
         assert len(rows[0]) == 1
-        assert rows[0][0]["added"] is True
-        assert rows[0][0]["extra_price"] == 1.50
+        assert rows[0][0]["action"] == "added"
 
     def test_multiple_extras_summed(self):
         from app.services.orders import _resolve_ingredient_customizations
@@ -426,8 +428,7 @@ class TestResolveIngredientCustomizations:
             prices, rows = _resolve_ingredient_customizations(items)
         assert prices[0] == 10.0
         assert len(rows[0]) == 1
-        assert rows[0][0]["added"] is False
-        assert rows[0][0]["extra_price"] == 0
+        assert rows[0][0]["action"] == "removed"
 
     def test_uses_server_extra_price_not_frontend(self):
         """Frontend sends extra_price=0.01 but server has 1.50 — server wins."""
@@ -444,7 +445,6 @@ class TestResolveIngredientCustomizations:
             mock_sb.select.side_effect = _mock_select_for_resolve
             prices, rows = _resolve_ingredient_customizations(items)
         assert prices[0] == 11.50  # uses server 1.50, not frontend 0.01
-        assert rows[0][0]["extra_price"] == 1.50
 
     def test_max_extra_choices_exceeded_raises(self):
         from app.services.orders import _resolve_ingredient_customizations

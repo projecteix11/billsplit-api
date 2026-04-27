@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from tests.conftest import make_order, make_order_item, VALID_TOKEN, VALID_USER_ID
+from tests.conftest import make_order, make_order_item, VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +450,7 @@ class TestListOrders:
 
     def test_list_orders_open_returns_200_with_valid_token(self, client: TestClient):
         orders = [make_order(), make_order(id="order-2", table_number=6)]
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.select.return_value = orders
                 resp = client.get(
@@ -461,7 +461,7 @@ class TestListOrders:
         assert resp.status_code == 200
 
     def test_list_orders_returns_data_envelope(self, client: TestClient):
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.select.return_value = [make_order()]
                 resp = client.get("/api/orders", headers=_auth_headers())
@@ -472,29 +472,31 @@ class TestListOrders:
         assert isinstance(body["data"], list)
 
     def test_list_orders_defaults_to_open_status(self, client: TestClient):
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = []
-                client.get("/api/orders", headers=_auth_headers())
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
+            with patch("app.services.orders._get_tenant_table_ids", return_value=["table-1"]):
+                with patch("app.services.orders.supabase") as mock_sb:
+                    mock_sb.select.return_value = []
+                    client.get("/api/orders", headers=_auth_headers())
 
         query = mock_sb.select.call_args[0][1]
         assert "status=eq.open" in query
 
     def test_list_orders_accepts_closed_status_param(self, client: TestClient):
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = []
-                resp = client.get(
-                    "/api/orders?status=closed",
-                    headers=_auth_headers(),
-                )
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
+            with patch("app.services.orders._get_tenant_table_ids", return_value=["table-1"]):
+                with patch("app.services.orders.supabase") as mock_sb:
+                    mock_sb.select.return_value = []
+                    resp = client.get(
+                        "/api/orders?status=closed",
+                        headers=_auth_headers(),
+                    )
 
         assert resp.status_code == 200
         query = mock_sb.select.call_args[0][1]
         assert "status=eq.closed" in query
 
     def test_list_orders_invalid_status_returns_400(self, client: TestClient):
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             resp = client.get(
                 "/api/orders?status=invalid",
                 headers=_auth_headers(),
@@ -506,7 +508,7 @@ class TestListOrders:
         assert "status must be open or closed" in body["error"]
 
     def test_list_orders_returns_500_on_db_error(self, client: TestClient):
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.select.side_effect = RuntimeError("connection refused")
                 resp = client.get("/api/orders", headers=_auth_headers())

@@ -69,13 +69,12 @@ class TestGetDishes:
             mock_sb.select.return_value = []
             client.get("/api/dishes")
 
-        mock_sb.select.assert_called_once_with(
-            "dishes",
-            "select=*,allergens:dish_allergens(allergen:allergens(id,name,icon))"
-            ",ingredients:dish_ingredients(id,ingredient_id,present,sort_order"
-            ",ingredient:ingredients(id,name,extra_price))"
-            "&is_available=eq.true&order=sort_order,name",
-        )
+        call_args = mock_sb.select.call_args
+        assert call_args[0][0] == "dishes"
+        query = call_args[0][1]
+        assert "is_available=eq.true" in query
+        assert "tenant_id=eq." in query
+        assert "order=sort_order,name" in query
 
     def test_get_dishes_returns_500_on_service_error(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
@@ -145,10 +144,12 @@ class TestGetCategories:
             mock_sb.select.return_value = []
             client.get("/api/categories")
 
-        mock_sb.select.assert_called_once_with(
-            "categories",
-            "select=id,name,sort_order,requires_kitchen&is_active=eq.true&order=sort_order",
-        )
+        call_args = mock_sb.select.call_args
+        assert call_args[0][0] == "categories"
+        query = call_args[0][1]
+        assert "select=id,name,sort_order,requires_kitchen" in query
+        assert "is_active=eq.true" in query
+        assert "tenant_id=eq." in query
 
     def test_get_categories_returns_500_on_error(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:

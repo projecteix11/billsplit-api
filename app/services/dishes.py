@@ -17,27 +17,6 @@ from app.models import (
     UpdateDishIngredientBody,
 )
 
-# ── Tenant helper ──────────────────────────────────────────────────────────
-
-_cached_tenant_id: str | None = None
-
-_FALLBACK_TENANT_ID = "ac87c9d9-0eda-451c-b583-c59e02e2e9e6"
-
-
-def _get_tenant_id() -> str:
-    """Get tenant_id from an existing dish, or fall back to default tenant."""
-    global _cached_tenant_id
-    if _cached_tenant_id:
-        return _cached_tenant_id
-    rows = supabase.select("dishes", "select=tenant_id&limit=1")
-    if rows:
-        _cached_tenant_id = rows[0]["tenant_id"]
-        return _cached_tenant_id
-    # Empty DB — use fallback tenant
-    _cached_tenant_id = _FALLBACK_TENANT_ID
-    return _cached_tenant_id
-
-
 # ── PostgREST select with nested joins ─────────────────────────────────────
 
 _DISH_SELECT = (
@@ -51,19 +30,19 @@ _DISH_SELECT = (
 # ── Dishes ──────────────────────────────────────────────────────────────────
 
 
-def get_dishes() -> list[DishFull]:
+def get_dishes(tenant_id: str) -> list[DishFull]:
     rows = supabase.select(
         "dishes",
-        f"{_DISH_SELECT}&is_available=eq.true&order=sort_order,name",
+        f"{_DISH_SELECT}&tenant_id=eq.{tenant_id}&is_available=eq.true&order=sort_order,name",
     )
     return [_parse_dish_full(row) for row in rows]
 
 
-def get_all_dishes() -> list[DishFull]:
+def get_all_dishes(tenant_id: str) -> list[DishFull]:
     """All dishes including unavailable (for management)."""
     rows = supabase.select(
         "dishes",
-        f"{_DISH_SELECT}&order=sort_order,name",
+        f"{_DISH_SELECT}&tenant_id=eq.{tenant_id}&order=sort_order,name",
     )
     return [_parse_dish_full(row) for row in rows]
 
@@ -78,12 +57,12 @@ def get_dish_by_id(dish_id: str) -> DishFull | None:
     return _parse_dish_full(rows[0])
 
 
-def create_dish(body: CreateDishBody) -> DishFull:
+def create_dish(body: CreateDishBody, tenant_id: str) -> DishFull:
     data = body.model_dump(exclude_none=True)
     # Map API field → DB field
     if "image" in data:
         data["img_medium"] = data.pop("image")
-    data["tenant_id"] = _get_tenant_id()
+    data["tenant_id"] = tenant_id
     inserted = supabase.insert("dishes", data, return_result=True)
     if not inserted:
         raise RuntimeError("failed to create dish")
@@ -110,16 +89,15 @@ def delete_dish(dish_id: str) -> None:
 # ── Categories ──────────────────────────────────────────────────────────────
 
 
-def get_categories() -> list[DishCategory]:
+def get_categories(tenant_id: str) -> list[DishCategory]:
     rows = supabase.select(
         "categories",
-        "select=id,name,sort_order,requires_kitchen&is_active=eq.true&order=sort_order",
+        f"select=id,name,sort_order,requires_kitchen&tenant_id=eq.{tenant_id}&is_active=eq.true&order=sort_order",
     )
     return [DishCategory(**row) for row in rows]
 
 
-def create_category(name: str, sort_order: int, requires_kitchen: bool = True) -> DishCategory:
-    tenant_id = _get_tenant_id()
+def create_category(name: str, sort_order: int, tenant_id: str, requires_kitchen: bool = True) -> DishCategory:
     inserted = supabase.insert(
         "categories",
         {"name": name, "sort_order": sort_order, "is_active": True, "tenant_id": tenant_id, "requires_kitchen": requires_kitchen},
@@ -215,8 +193,7 @@ def get_dish_ingredients(dish_id: str) -> list[DishIngredient]:
     return result
 
 
-def create_dish_ingredient(dish_id: str, body: CreateDishIngredientBody) -> DishIngredient:
-    tenant_id = _get_tenant_id()
+def create_dish_ingredient(dish_id: str, body: CreateDishIngredientBody, tenant_id: str) -> DishIngredient:
     # Create ingredient in master table
     ing_data = {
         "tenant_id": tenant_id,

@@ -27,8 +27,17 @@ def _calculate_tax(subtotal: float) -> float:
     return _round2(subtotal * TAX_RATE_ES / 100)
 
 
-def fetch_orders(status: str, kitchen_only: bool = False) -> list[Order]:
-    query = f"select=*,items:order_items(*)&status=eq.{status}"
+def _get_tenant_table_ids(tenant_id: str) -> list[str]:
+    rows = supabase.select("restaurant_tables", f"select=id&tenant_id=eq.{tenant_id}&is_active=eq.true")
+    return [r["id"] for r in rows]
+
+
+def fetch_orders(tenant_id: str, status: str, kitchen_only: bool = False) -> list[Order]:
+    table_ids = _get_tenant_table_ids(tenant_id)
+    if not table_ids:
+        return []
+    ids_csv = ",".join(table_ids)
+    query = f"select=*,items:order_items(*)&status=eq.{status}&table_id=in.({ids_csv})"
     if status == "closed":
         query += "&order=updated_at.desc&limit=100"
     else:
@@ -66,7 +75,7 @@ def get_open_order_for_table(table_id: str) -> Order | None:
     return Order(**rows[0])
 
 
-def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) -> Order:
+def create_order(table_id: str, table_number: int, items: list[NewOrderItem], tenant_id: str = "") -> Order:
     # Resolve prices server-side before calculating totals
     precomputed = _resolve_ingredient_customizations(items)
     resolved_prices = precomputed[0]
@@ -81,6 +90,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem]) ->
         "subtotal": subtotal,
         "tax_amount": tax_amount,
         "total": total,
+        "tenant_id": tenant_id,
     }
 
     inserted = supabase.insert("orders", order_row, return_result=True)

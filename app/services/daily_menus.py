@@ -64,20 +64,20 @@ def _hydrate_menus(rows: list[dict]) -> list[DailyMenu]:
 # ── Daily menus CRUD ──────────────────────────────────────────────────────
 
 
-def get_daily_menus() -> list[DailyMenu]:
+def get_daily_menus(tenant_id: str) -> list[DailyMenu]:
     """Active menus only (public / client)."""
     rows = supabase.select(
         "daily_menus",
-        f"{_MENU_SELECT}&is_active=eq.true",
+        f"{_MENU_SELECT}&tenant_id=eq.{tenant_id}&is_active=eq.true",
     )
     return _hydrate_menus(rows)
 
 
-def get_all_daily_menus() -> list[DailyMenu]:
+def get_all_daily_menus(tenant_id: str) -> list[DailyMenu]:
     """All menus including inactive (management)."""
     rows = supabase.select(
         "daily_menus",
-        f"{_MENU_SELECT}",
+        f"{_MENU_SELECT}&tenant_id=eq.{tenant_id}",
     )
     return _hydrate_menus(rows)
 
@@ -91,8 +91,9 @@ def get_daily_menu_by_id(menu_id: str) -> DailyMenu | None:
     return menus[0] if menus else None
 
 
-def create_daily_menu(body: CreateDailyMenuBody) -> DailyMenu:
+def create_daily_menu(body: CreateDailyMenuBody, tenant_id: str) -> DailyMenu:
     data = body.model_dump(exclude_none=True)
+    data["tenant_id"] = tenant_id
     inserted = supabase.insert("daily_menus", data, return_result=True)
     if not inserted:
         raise RuntimeError("failed to create daily menu")

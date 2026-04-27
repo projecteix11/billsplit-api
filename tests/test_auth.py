@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
-from tests.conftest import VALID_TOKEN, VALID_USER_ID
+from tests.conftest import VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
 
 
 def _auth_headers(token: str = VALID_TOKEN) -> dict:
@@ -37,10 +37,11 @@ class TestAuthOnListOrders:
         assert resp.status_code == 401
 
     def test_valid_token_passes_through(self, client: TestClient):
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = []
-                resp = client.get("/api/orders", headers=_auth_headers())
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
+            with patch("app.services.orders._get_tenant_table_ids", return_value=[]):
+                with patch("app.services.orders.supabase") as mock_sb:
+                    mock_sb.select.return_value = []
+                    resp = client.get("/api/orders", headers=_auth_headers())
         assert resp.status_code == 200
 
     def test_invalid_token_returns_401(self, client: TestClient):
@@ -75,7 +76,7 @@ class TestAuthOnKitchenStatus:
         assert resp.status_code == 401
 
     def test_valid_token_allows_update(self, client: TestClient):
-        with patch("app.db.supabase.verify_token", return_value=VALID_USER_ID):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
@@ -129,6 +130,7 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
+        request.state.user_id = None  # prevent short-circuit to state cache
         request.headers = {}
         with pytest.raises(AuthError) as exc_info:
             require_auth(request)
@@ -139,6 +141,7 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
+        request.state.user_id = None  # prevent short-circuit to state cache
         request.headers = {"Authorization": "Token abc"}
         with pytest.raises(AuthError) as exc_info:
             require_auth(request)
@@ -149,8 +152,9 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
+        request.state.user_id = None  # prevent short-circuit to state cache
         request.headers = {"Authorization": "Bearer some-token"}
-        with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("bad")):
+        with patch("app.middleware.auth.supabase.verify_token_full", side_effect=ValueError("bad")):
             with pytest.raises(AuthError) as exc_info:
                 require_auth(request)
         assert "Invalid or expired" in exc_info.value.message
@@ -160,7 +164,8 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
+        request.state.user_id = None  # prevent short-circuit to state cache
         request.headers = {"Authorization": f"Bearer {VALID_TOKEN}"}
-        with patch("app.middleware.auth.supabase.verify_token", return_value=VALID_USER_ID):
+        with patch("app.middleware.auth.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             user_id = require_auth(request)
         assert user_id == VALID_USER_ID

@@ -110,6 +110,12 @@ def delete_auth_user(user_id: str) -> None:
 
 
 def verify_token(token: str) -> str:
+    user_id, _ = verify_token_full(token)
+    return user_id
+
+
+def verify_token_full(token: str) -> tuple[str, str]:
+    """Verify token and return (user_id, tenant_id)."""
     resp = _session.get(
         f"{_base_url}/auth/v1/user",
         headers={"apikey": _api_key, "Authorization": f"Bearer {token}"},
@@ -121,4 +127,5 @@ def verify_token(token: str) -> str:
     user_id = user.get("id", "")
     if not user_id:
         raise ValueError("invalid token: no user id")
-    return user_id
+    tenant_id = str((user.get("user_metadata") or {}).get("tenant_id", ""))
+    return user_id, tenant_id
