@@ -236,6 +236,10 @@ class TestVerifyToken:
         resp.status_code = 200
         resp.json.return_value = {"id": "user-uuid-abc", "email": "test@example.com"}
         sb._session.get.return_value = resp
+        db_resp = MagicMock()
+        db_resp.status_code = 200
+        db_resp.json.return_value = []
+        sb._session.request.return_value = db_resp
         user_id = sb.verify_token("valid-token")
         assert user_id == "user-uuid-abc"
 
@@ -262,6 +266,10 @@ class TestVerifyToken:
         resp.status_code = 200
         resp.json.return_value = {"id": "user-1"}
         sb._session.get.return_value = resp
+        db_resp = MagicMock()
+        db_resp.status_code = 200
+        db_resp.json.return_value = []
+        sb._session.request.return_value = db_resp
         sb.verify_token("my-bearer-token")
         call_kwargs = sb._session.get.call_args[1]
         assert call_kwargs["headers"]["Authorization"] == "Bearer my-bearer-token"
@@ -272,6 +280,10 @@ class TestVerifyToken:
         resp.status_code = 200
         resp.json.return_value = {"id": "user-1"}
         sb._session.get.return_value = resp
+        db_resp = MagicMock()
+        db_resp.status_code = 200
+        db_resp.json.return_value = []
+        sb._session.request.return_value = db_resp
         sb.verify_token("token")
         url = sb._session.get.call_args[0][0]
         assert "/auth/v1/user" in url

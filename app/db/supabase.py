@@ -137,8 +137,22 @@ def verify_token_full(token: str) -> tuple[str, str, str]:
     user_id = user.get("id", "")
     if not user_id:
         raise ValueError("invalid token: no user id")
+
     meta = user.get("user_metadata") or {}
-    tenant_id = str(meta.get("tenant_id", ""))
     role = str(meta.get("role", ""))
+
+    # Platform developers bypass tenant resolution entirely
+    if role == "developer":
+        _TOKEN_CACHE[token] = (user_id, "", role, time.monotonic() + _TOKEN_CACHE_TTL)
+        return user_id, "", role
+
+    # Read tenant_id from user_roles (source of truth), fallback to metadata
+    rows = select("user_roles", f"select=tenant_id,role&user_id=eq.{user_id}&enabled=eq.true&limit=1")
+    if rows:
+        tenant_id = str(rows[0].get("tenant_id", ""))
+        role = str(rows[0].get("role", role))
+    else:
+        tenant_id = str(meta.get("tenant_id", ""))
+
     _TOKEN_CACHE[token] = (user_id, tenant_id, role, time.monotonic() + _TOKEN_CACHE_TTL)
     return user_id, tenant_id, role
