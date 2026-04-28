@@ -38,10 +38,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
             token = header[7:]
             try:
-                user_id, tenant_id, role = supabase.verify_token_full(token)
+                user_id, tenant_id = supabase.verify_token_full(token)
                 request.state.user_id = user_id
                 request.state.tenant_id = tenant_id
-                request.state.role = role
             except Exception:
                 log_event(LogFactory.auth_event(
                     "auth_token_invalid",
@@ -78,10 +77,9 @@ def require_auth(request: Request) -> str:
         raise AuthError("Missing or invalid Authorization header")
     token = header[7:]
     try:
-        user_id, tenant_id, role = supabase.verify_token_full(token)
+        user_id, tenant_id = supabase.verify_token_full(token)
         request.state.user_id = user_id
         request.state.tenant_id = tenant_id
-        request.state.role = role
         return user_id
     except Exception:
         raise AuthError("Invalid or expired token")

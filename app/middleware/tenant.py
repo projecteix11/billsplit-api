@@ -73,11 +73,10 @@ async def get_current_tenant(request: Request) -> str:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
-            user_id, tenant_id, role = supabase.verify_token_full(auth_header[7:])
+            user_id, tenant_id = supabase.verify_token_full(auth_header[7:])
             if tenant_id:
                 request.state.user_id = user_id
                 request.state.tenant_id = tenant_id
-                request.state.role = role
                 return tenant_id
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid or expired token")

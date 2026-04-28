@@ -25,7 +25,7 @@ class TestUpdateKitchenStatus:
     _valid_body = {"status": "cooking"}
 
     def test_update_kitchen_status_returns_200_with_valid_auth(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
@@ -37,7 +37,7 @@ class TestUpdateKitchenStatus:
         assert resp.status_code == 200
 
     def test_update_kitchen_status_returns_null_data_envelope(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
@@ -74,7 +74,7 @@ class TestUpdateKitchenStatus:
 
     @pytest.mark.parametrize("status", ["pending", "cooking", "ready", "delivered"])
     def test_update_kitchen_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
@@ -86,7 +86,7 @@ class TestUpdateKitchenStatus:
 
     @pytest.mark.parametrize("bad_status", ["done", "cancelled", "", "COOKING", "unknown"])
     def test_update_kitchen_status_rejects_invalid_status(self, client: TestClient, bad_status: str):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             resp = client.patch(
                 "/order-items/item-1/kitchen-status",
                 json={"status": bad_status},
@@ -98,7 +98,7 @@ class TestUpdateKitchenStatus:
         assert "pending, cooking, ready, delivered" in body["error"]
 
     def test_update_kitchen_status_missing_status_field_returns_422(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             resp = client.patch(
                 "/order-items/item-1/kitchen-status",
                 json={},
@@ -107,7 +107,7 @@ class TestUpdateKitchenStatus:
         assert resp.status_code == 422
 
     def test_update_kitchen_status_calls_update_correct_item(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 client.patch(
@@ -122,7 +122,7 @@ class TestUpdateKitchenStatus:
         assert call_args[0][2]["kitchen_status"] == "ready"
 
     def test_update_kitchen_status_returns_500_on_db_error(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.side_effect = RuntimeError("db failure")
                 resp = client.patch(

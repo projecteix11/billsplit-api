@@ -37,7 +37,7 @@ class TestAuthOnListOrders:
         assert resp.status_code == 401
 
     def test_valid_token_passes_through(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders._get_tenant_table_ids", return_value=[]):
                 with patch("app.services.orders.supabase") as mock_sb:
                     mock_sb.select.return_value = []
@@ -76,7 +76,7 @@ class TestAuthOnKitchenStatus:
         assert resp.status_code == 401
 
     def test_valid_token_allows_update(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             with patch("app.services.orders.supabase") as mock_sb:
                 mock_sb.update.return_value = None
                 resp = client.patch(
@@ -166,6 +166,6 @@ class TestRequireAuthDependency:
         request = MagicMock()
         request.state.user_id = None  # prevent short-circuit to state cache
         request.headers = {"Authorization": f"Bearer {VALID_TOKEN}"}
-        with patch("app.middleware.auth.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.middleware.auth.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID)):
             user_id = require_auth(request)
         assert user_id == VALID_USER_ID
