@@ -1,9 +1,19 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.db import supabase
+from app.middleware.auth import require_auth
 
 router = APIRouter()
+
+
+@router.get("/tenants")
+def list_tenants(request: Request, user_id: str = Depends(require_auth)):
+    role = getattr(request.state, "role", None)
+    if role != "developer":
+        return JSONResponse(status_code=403, content={"data": None, "error": "Forbidden"})
+    rows = supabase.select("tenants", "select=id,name,slug,is_active&order=name.asc")
+    return {"data": rows, "error": None}
 
 
 @router.get("/tenants/by-slug/{slug}")
