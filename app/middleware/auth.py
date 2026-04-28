@@ -18,7 +18,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         method = request.method
 
         needs_auth = (
-            (method == "GET" and path in ("/orders", "/reservations")) or
+            (method == "GET" and path in ("/orders", "/reservations", "/me")) or
             (method == "PATCH" and ("/kitchen-status" in path or path.startswith("/reservations/"))) or
             (method in ("POST", "PATCH", "DELETE") and path.startswith("/dishes")) or
             (method == "POST" and path == "/allergens") or
