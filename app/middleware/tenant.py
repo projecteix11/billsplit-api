@@ -40,7 +40,7 @@ async def get_current_tenant(request: Request) -> str:
     Priority:
       1. JWT already verified by AuthMiddleware or require_auth → use state
       2. Bearer token in header → verify and extract tenant_id
-      3. X-Tenant-Slug header → use directly as tenant_id (TODO: DB lookup once tenants table is ready)
+      3. X-Tenant-Slug header → slug lookup in DB
       4. Origin/Referer header → parse slug → DB lookup
       5. 404
     """
@@ -61,11 +61,13 @@ async def get_current_tenant(request: Request) -> str:
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # 3. X-Tenant-Slug header — treated as direct tenant_id until intermediate tenants table exists
+    # 3. X-Tenant-Slug header → resolve slug against DB
     tenant_slug_header = request.headers.get("X-Tenant-Slug")
     if tenant_slug_header:
-        request.state.tenant_id = tenant_slug_header
-        return tenant_slug_header
+        tenant_id = _resolve_slug(tenant_slug_header)
+        if tenant_id:
+            request.state.tenant_id = tenant_id
+            return tenant_id
 
     # 4. Public route — resolve from Origin header (browser-enforced, JS cannot spoof cross-origin)
     origin = request.headers.get("origin") or request.headers.get("referer")
