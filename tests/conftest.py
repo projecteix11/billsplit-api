@@ -30,6 +30,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 
 from fastapi.testclient import TestClient
 from app.middleware.tenant import get_current_tenant
+import app.middleware.tenant as _tenant_middleware
 
 # ---------------------------------------------------------------------------
 # Factories for common model dicts
@@ -121,6 +122,12 @@ def app():
         sb._session = mock.MagicMock()
         sb._base_url = "http://test.supabase.local"
         sb._api_key = "test-service-role-key"
+
+        # All features enabled in tests — avoids DB calls from _get_tenant_features
+        _tenant_middleware._get_tenant_features = lambda _tid: {
+            "reservations": True, "kitchen": True, "payments": True,
+            "daily_menus": True, "campaigns": True, "qr_codes": True,
+        }
 
         from main import app as fastapi_app
         fastapi_app.dependency_overrides[get_current_tenant] = lambda: VALID_TENANT_ID
