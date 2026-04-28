@@ -125,7 +125,7 @@ def test_orders_list_with_valid_jwt(real_tenant_client, monkeypatch):
     monkeypatch.setattr(t, "_SLUG_CACHE", {})
 
     with (
-        mock.patch("app.db.supabase.verify_token_full", return_value=("user-1", "tenant-uuid-staff")),
+        mock.patch("app.db.supabase.verify_token_full", return_value=("user-1", "tenant-uuid-staff", "admin")),
         mock.patch("app.services.orders.fetch_orders", return_value=[]) as m,
     ):
         resp = real_tenant_client.get(
