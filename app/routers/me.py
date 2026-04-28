@@ -9,7 +9,20 @@ router = APIRouter()
 
 @router.get("/me")
 def get_me(request: Request, user_id: str = Depends(require_auth)):
+    role = getattr(request.state, "role", None)
     tenant_id = getattr(request.state, "tenant_id", None)
+
+    if role == "developer":
+        return {
+            "data": {
+                "user_id": user_id,
+                "tenant": None,
+                "role": role,
+                "is_platform_user": True,
+            },
+            "error": None,
+        }
+
     if not tenant_id:
         return JSONResponse(status_code=400, content={"data": None, "error": "No tenant associated with this user"})
 
@@ -20,7 +33,6 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
     if not tenant_rows:
         return JSONResponse(status_code=404, content={"data": None, "error": "Tenant not found"})
 
-    role = getattr(request.state, "role", None)
     tenant = tenant_rows[0]
     return {
         "data": {
@@ -34,6 +46,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
                 "trial_ends_at": tenant["trial_ends_at"],
             },
             "role": role,
+            "is_platform_user": False,
         },
         "error": None,
     }
