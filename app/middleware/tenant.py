@@ -1,11 +1,12 @@
 import time
 from urllib.parse import urlparse
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from app.db import supabase
 
 _SLUG_CACHE: dict[str, tuple[str, float]] = {}
+_FEATURES_CACHE: dict[str, tuple[dict, float]] = {}
 _CACHE_TTL = 300.0  # 5 minutes
 
 # Subdomains reserved for platform services — never treated as tenant slugs
@@ -32,6 +33,25 @@ def _parse_slug_from_origin(origin: str | None) -> str | None:
         slug = parts[0]
         return None if slug in _RESERVED_SLUGS else slug
     return None
+
+
+def _get_tenant_features(tenant_id: str) -> dict:
+    cached = _FEATURES_CACHE.get(tenant_id)
+    if cached and time.monotonic() - cached[1] < _CACHE_TTL:
+        return cached[0]
+    rows = supabase.select("tenants", f"select=features&id=eq.{tenant_id}&limit=1")
+    features = rows[0]["features"] if rows else {}
+    _FEATURES_CACHE[tenant_id] = (features or {}, time.monotonic())
+    return features or {}
+
+
+def require_feature(key: str):
+    async def dep(tenant_id: str = Depends(get_current_tenant)) -> str:
+        features = _get_tenant_features(tenant_id)
+        if not features.get(key):
+            raise HTTPException(status_code=403, detail=f"Feature '{key}' not enabled for this tenant")
+        return tenant_id
+    return dep
 
 
 async def get_current_tenant(request: Request) -> str:
