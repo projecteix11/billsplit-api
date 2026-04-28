@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
-from app.middleware.tenant import get_current_tenant
+from app.middleware.tenant import require_feature
 from app.db import supabase
 
 router = APIRouter()
@@ -30,7 +30,7 @@ class CreateReservationBody(BaseModel):
 async def create_reservation(
     request: Request,
     body: CreateReservationBody,
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(require_feature("reservations")),
 ):
     if not 1 <= body.party_size <= 20:
         return JSONResponse(status_code=422, content={"data": None, "error": "party_size must be between 1 and 20"})
@@ -54,7 +54,7 @@ async def create_reservation(
 @router.get("/reservations")
 async def list_reservations(
     _user_id: str = Depends(require_auth),
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(require_feature("reservations")),
 ):
     try:
         rows = supabase.select("reservations", f"tenant_id=eq.{tenant_id}&order=date.asc,time.asc")

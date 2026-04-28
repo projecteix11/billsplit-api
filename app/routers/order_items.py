@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
+from app.middleware.tenant import require_feature
 from app.middleware.rate_limit import limiter
 from app.models import UpdateQuantityBody, UpdatePriceBody
 from app.services import orders as svc
@@ -25,7 +26,7 @@ class PaymentStatusBody(BaseModel):
 
 @router.patch("/order-items/{item_id}/kitchen-status")
 @limiter.limit("20/minute")
-def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth)):
+def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth), _tenant_id: str = Depends(require_feature("kitchen"))):
     if body.status not in VALID_KITCHEN_STATUSES:
         return JSONResponse(
             status_code=400,
@@ -44,7 +45,7 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
 
 @router.patch("/order-items/payment-status")
 @limiter.limit("20/minute")
-def update_payment_status(request: Request, body: PaymentStatusBody):
+def update_payment_status(request: Request, body: PaymentStatusBody, _tenant_id: str = Depends(require_feature("payments"))):
     if not body.itemIds:
         return JSONResponse(status_code=400, content={"data": None, "error": "itemIds[] is required"})
     if body.status not in VALID_PAYMENT_STATUSES:

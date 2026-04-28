@@ -1,9 +1,10 @@
 import traceback
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.middleware.rate_limit import limiter
+from app.middleware.tenant import require_feature
 from app.models import CreatePaymentBody, RedsysSignBody
 from app.logging import log_event, LogFactory
 from app.services import payments as svc
@@ -13,7 +14,7 @@ router = APIRouter()
 
 @router.post("/payments", status_code=201)
 @limiter.limit("20/minute")
-def create_payment(request: Request, body: CreatePaymentBody):
+def create_payment(request: Request, body: CreatePaymentBody, _tenant_id: str = Depends(require_feature("payments"))):
     if not body.orderId or not body.amount or not body.method:
         return JSONResponse(
             status_code=400,

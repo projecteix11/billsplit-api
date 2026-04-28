@@ -1,11 +1,12 @@
 import time
 from urllib.parse import urlparse
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from app.db import supabase
 
 _SLUG_CACHE: dict[str, tuple[str, float]] = {}
+_FEATURES_CACHE: dict[str, tuple[dict, float]] = {}
 _CACHE_TTL = 300.0  # 5 minutes
 
 # Subdomains reserved for platform services — never treated as tenant slugs
@@ -34,13 +35,32 @@ def _parse_slug_from_origin(origin: str | None) -> str | None:
     return None
 
 
+def _get_tenant_features(tenant_id: str) -> dict:
+    cached = _FEATURES_CACHE.get(tenant_id)
+    if cached and time.monotonic() - cached[1] < _CACHE_TTL:
+        return cached[0]
+    rows = supabase.select("tenants", f"select=features&id=eq.{tenant_id}&limit=1")
+    features = rows[0]["features"] if rows else {}
+    _FEATURES_CACHE[tenant_id] = (features or {}, time.monotonic())
+    return features or {}
+
+
+def require_feature(key: str):
+    async def dep(tenant_id: str = Depends(get_current_tenant)) -> str:
+        features = _get_tenant_features(tenant_id)
+        if not features.get(key):
+            raise HTTPException(status_code=403, detail=f"Feature '{key}' not enabled for this tenant")
+        return tenant_id
+    return dep
+
+
 async def get_current_tenant(request: Request) -> str:
     """FastAPI dependency that resolves the current tenant_id.
 
     Priority:
       1. JWT already verified by AuthMiddleware or require_auth → use state
       2. Bearer token in header → verify and extract tenant_id
-      3. X-Tenant-Slug header → use directly as tenant_id (TODO: DB lookup once tenants table is ready)
+      3. X-Tenant-Slug header → slug lookup in DB
       4. Origin/Referer header → parse slug → DB lookup
       5. 404
     """
@@ -61,11 +81,13 @@ async def get_current_tenant(request: Request) -> str:
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # 3. X-Tenant-Slug header — treated as direct tenant_id until intermediate tenants table exists
+    # 3. X-Tenant-Slug header → resolve slug against DB
     tenant_slug_header = request.headers.get("X-Tenant-Slug")
     if tenant_slug_header:
-        request.state.tenant_id = tenant_slug_header
-        return tenant_slug_header
+        tenant_id = _resolve_slug(tenant_slug_header)
+        if tenant_id:
+            request.state.tenant_id = tenant_id
+            return tenant_id
 
     # 4. Public route — resolve from Origin header (browser-enforced, JS cannot spoof cross-origin)
     origin = request.headers.get("origin") or request.headers.get("referer")
