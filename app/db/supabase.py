@@ -1,9 +1,14 @@
 import os
+import time
 import requests
 
 _session: requests.Session | None = None
 _base_url: str = ""
 _api_key: str = ""
+
+# Token verification cache: token → (user_id, tenant_id, role, expires_at)
+_TOKEN_CACHE: dict[str, tuple[str, str, str, float]] = {}
+_TOKEN_CACHE_TTL = 120.0  # 2 minutes
 
 
 def init() -> None:
@@ -115,13 +120,18 @@ def verify_token(token: str) -> str:
 
 
 def verify_token_full(token: str) -> tuple[str, str, str]:
-    """Verify token and return (user_id, tenant_id, role)."""
+    """Verify token and return (user_id, tenant_id, role). Result is cached for 2 minutes."""
+    cached = _TOKEN_CACHE.get(token)
+    if cached and time.monotonic() < cached[3]:
+        return cached[0], cached[1], cached[2]
+
     resp = _session.get(
         f"{_base_url}/auth/v1/user",
         headers={"apikey": _api_key, "Authorization": f"Bearer {token}"},
         timeout=10,
     )
     if resp.status_code != 200:
+        _TOKEN_CACHE.pop(token, None)
         raise ValueError("invalid or expired token")
     user = resp.json()
     user_id = user.get("id", "")
@@ -130,4 +140,5 @@ def verify_token_full(token: str) -> tuple[str, str, str]:
     meta = user.get("user_metadata") or {}
     tenant_id = str(meta.get("tenant_id", ""))
     role = str(meta.get("role", ""))
+    _TOKEN_CACHE[token] = (user_id, tenant_id, role, time.monotonic() + _TOKEN_CACHE_TTL)
     return user_id, tenant_id, role
