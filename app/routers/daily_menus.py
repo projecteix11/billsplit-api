@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
-from app.middleware.tenant import get_current_tenant
+from app.middleware.tenant import require_feature
 from app.models import (
     CreateDailyMenuBody,
     CreateDailyMenuItemBody,
@@ -21,7 +21,7 @@ router = APIRouter()
 
 
 @router.get("/daily-menus")
-async def get_daily_menus(all: bool = False, tenant_id: str = Depends(get_current_tenant)):
+async def get_daily_menus(all: bool = False, tenant_id: str = Depends(require_feature("daily_menus"))):
     try:
         if all:
             data = svc.get_all_daily_menus(tenant_id)
@@ -45,7 +45,7 @@ def get_daily_menu(menu_id: str):
 
 @router.post("/daily-menus", status_code=201)
 @limiter.limit("20/minute")
-async def create_daily_menu(request: Request, body: CreateDailyMenuBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
+async def create_daily_menu(request: Request, body: CreateDailyMenuBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(require_feature("daily_menus"))):
     try:
         menu = svc.create_daily_menu(body, tenant_id)
         return JSONResponse(status_code=201, content={"data": menu.model_dump(), "error": None})
