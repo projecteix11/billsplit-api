@@ -28,7 +28,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
 
     tenant_rows = supabase.select(
         "tenants",
-        f"select=id,slug,plan,features,is_active,trial_ends_at&id=eq.{tenant_id}&limit=1",
+        f"select=id,slug,plan,features,is_active,trial_ends_at,max_users&id=eq.{tenant_id}&limit=1",
     )
     if not tenant_rows:
         return JSONResponse(status_code=404, content={"data": None, "error": "Tenant not found"})
@@ -44,6 +44,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
                 "features": tenant["features"],
                 "is_active": tenant["is_active"],
                 "trial_ends_at": tenant["trial_ends_at"],
+                "max_users": tenant["max_users"],
             },
             "role": role,
             "is_platform_user": False,
