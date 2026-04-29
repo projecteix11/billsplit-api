@@ -139,7 +139,8 @@ def verify_token_full(token: str) -> tuple[str, str, str]:
         raise ValueError("invalid token: no user id")
 
     meta = user.get("user_metadata") or {}
-    role = str(meta.get("role", ""))
+    app_meta = user.get("app_metadata") or {}
+    role = str(meta.get("role", "") or app_meta.get("role", ""))
 
     # Platform developers bypass tenant resolution entirely
     if role == "developer":
@@ -152,7 +153,7 @@ def verify_token_full(token: str) -> tuple[str, str, str]:
         tenant_id = str(rows[0].get("tenant_id", ""))
         role = str(rows[0].get("role", role))
     else:
-        tenant_id = str(meta.get("tenant_id", ""))
+        tenant_id = str(meta.get("tenant_id", "") or app_meta.get("tenant_id", ""))
 
     _TOKEN_CACHE[token] = (user_id, tenant_id, role, time.monotonic() + _TOKEN_CACHE_TTL)
     return user_id, tenant_id, role
