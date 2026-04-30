@@ -11,7 +11,7 @@ from app.services import orders as svc
 
 router = APIRouter()
 
-VALID_KITCHEN_STATUSES = {"pending", "cooking", "ready", "delivered"}
+VALID_KITCHEN_STATUSES = {"pending", "cooking", "ready", "delivered", "cancelled"}
 VALID_PAYMENT_STATUSES = {"unassigned", "assigned", "paid"}
 
 
@@ -30,7 +30,7 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
     if body.status not in VALID_KITCHEN_STATUSES:
         return JSONResponse(
             status_code=400,
-            content={"data": None, "error": "status must be one of: pending, cooking, ready, delivered"},
+            content={"data": None, "error": "status must be one of: pending, cooking, ready, delivered, cancelled"},
         )
     try:
         svc.update_item_kitchen_status(item_id, body.status)
