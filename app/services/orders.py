@@ -153,7 +153,8 @@ def close_order(order_id: str, tenant_id: str | None = None) -> None:
     dish_svc.delete_custom_dishes_for_table(order.table_id)
 
 
-def update_item_kitchen_status(item_id: str, status: str) -> None:
+def update_item_kitchen_status(item_id: str, status: str, tenant_id: str) -> None:
+    _assert_item_owner(item_id, tenant_id)
     supabase.update("order_items", f"id=eq.{item_id}", {"kitchen_status": status})
 
 

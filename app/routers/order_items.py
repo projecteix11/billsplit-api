@@ -26,19 +26,21 @@ class PaymentStatusBody(BaseModel):
 
 @router.patch("/order-items/{item_id}/kitchen-status")
 @limiter.limit("20/minute")
-def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth), _tenant_id: str = Depends(require_feature("kitchen"))):
+def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(require_feature("kitchen"))):
     if body.status not in VALID_KITCHEN_STATUSES:
         return JSONResponse(
             status_code=400,
             content={"data": None, "error": "status must be one of: pending, cooking, ready, delivered, cancelled"},
         )
     try:
-        svc.update_item_kitchen_status(item_id, body.status)
+        svc.update_item_kitchen_status(item_id, body.status, tenant_id)
         log_event(LogFactory.order_lifecycle(
             "kitchen_status_changed", "",
             metadata={"item_id": item_id, "new_status": body.status},
         ))
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
