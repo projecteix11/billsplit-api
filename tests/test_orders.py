@@ -396,10 +396,12 @@ class TestCloseOrder:
         order = make_order(status="closed")
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.return_value = [order]
-            resp = client.patch("/orders/order-1/close")
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                resp = client.patch("/orders/order-1/close")
 
         assert resp.status_code == 200
         mock_sb.update.assert_not_called()
+        mock_dish_sb.delete.assert_not_called()
 
     def test_close_order_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
