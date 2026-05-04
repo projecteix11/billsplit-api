@@ -287,11 +287,9 @@ class TestUpdatePaymentStatus:
 class TestDeleteOrderItem:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
-            # delete_order_item: select order_id first
-            # _assert_item_owner: select with nested order
+            # _assert_item_owner: single SELECT with nested order (returns order_id)
             # _recalculate_order_totals: get_order_by_id (orders table)
             mock_sb.select.side_effect = [
-                [{"order_id": "order-1"}],                                           # delete_order_item exists check
                 [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
                 [],  # get_order_by_id → recalculate skips
             ]
@@ -303,10 +301,7 @@ class TestDeleteOrderItem:
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.side_effect = [
-                [{"order_id": "order-1"}],                                           # delete_order_item exists check
-                [{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}],  # _assert_item_owner
-            ]
+            mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/order-items/item-1", headers=_auth_headers())
 
@@ -331,8 +326,7 @@ class TestUpdateOrderItemQuantity:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = [
                 [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
-                [{"order_id": "order-1"}],   # select after update
-                [],                          # get_order_by_id → recalculate skips
+                [],  # get_order_by_id → recalculate skips
             ]
             mock_sb.update.return_value = None
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
@@ -349,6 +343,14 @@ class TestUpdateOrderItemQuantity:
         assert resp.status_code == 404
         mock_sb.update.assert_not_called()
 
+    def test_returns_404_when_item_not_found(self, client: TestClient):
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch("/order-items/item-1/quantity", json={"quantity": 3}, headers=_auth_headers())
+
+        assert resp.status_code == 404
+
 
 # ---------------------------------------------------------------------------
 # PATCH /order-items/{item_id}/price — ownership check
@@ -359,7 +361,7 @@ class TestUpdateOrderItemPrice:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = [
                 [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
-                [{"order_id": "order-1", "dish_price": 10.0, "original_price": None}],  # price update fetch
+                [{"dish_price": 10.0, "original_price": None}],                       # price fetch
                 [],  # get_order_by_id → recalculate skips
             ]
             mock_sb.update.return_value = None
@@ -376,3 +378,11 @@ class TestUpdateOrderItemPrice:
 
         assert resp.status_code == 404
         mock_sb.update.assert_not_called()
+
+    def test_returns_404_when_item_not_found(self, client: TestClient):
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch("/order-items/item-1/price", json={"price": 8.0}, headers=_auth_headers())
+
+        assert resp.status_code == 404

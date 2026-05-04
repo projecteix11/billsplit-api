@@ -206,48 +206,38 @@ def _recalculate_order_totals(order_id: str) -> None:
     })
 
 
-def _assert_item_owner(item_id: str, tenant_id: str) -> None:
-    """Raise ValueError if item_id does not belong to an order of tenant_id."""
+def _assert_item_owner(item_id: str, tenant_id: str) -> str:
+    """Verify item belongs to tenant. Returns order_id."""
     rows = supabase.select(
         "order_items",
         f"select=order_id,order:orders(tenant_id)&id=eq.{item_id}&limit=1",
     )
     if not rows or rows[0].get("order", {}).get("tenant_id") != tenant_id:
         raise ValueError(f"order item {item_id} not found")
+    return rows[0]["order_id"]
 
 
 def delete_order_item(item_id: str, tenant_id: str) -> None:
     """Delete a single order item and recalculate parent order totals."""
-    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
-    if not rows:
-        raise ValueError(f"order item {item_id} not found")
-    _assert_item_owner(item_id, tenant_id)
-    order_id = rows[0]["order_id"]
-
+    order_id = _assert_item_owner(item_id, tenant_id)
     supabase.delete("order_items", f"id=eq.{item_id}")
     _recalculate_order_totals(order_id)
 
 
 def update_order_item_quantity(item_id: str, quantity: int, tenant_id: str) -> None:
     """Update the quantity of a single order item and recalculate parent order totals."""
-    _assert_item_owner(item_id, tenant_id)
+    order_id = _assert_item_owner(item_id, tenant_id)
     supabase.update("order_items", f"id=eq.{item_id}", {"quantity": quantity})
-
-    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
-    if not rows:
-        raise ValueError(f"order item {item_id} not found")
-    order_id = rows[0]["order_id"]
-
     _recalculate_order_totals(order_id)
 
 
 def update_order_item_price(item_id: str, price: float, tenant_id: str, reason: Optional[str] = None) -> None:
     """Update the price of a single order item and recalculate parent order totals."""
-    _assert_item_owner(item_id, tenant_id)
+    order_id = _assert_item_owner(item_id, tenant_id)
     update_data: dict = {"dish_price": price}
 
     # Fetch current item to preserve original price on first override
-    rows = supabase.select("order_items", f"select=order_id,dish_price,original_price&id=eq.{item_id}&limit=1")
+    rows = supabase.select("order_items", f"select=dish_price,original_price&id=eq.{item_id}&limit=1")
     if not rows:
         raise ValueError(f"order item {item_id} not found")
 
@@ -257,8 +247,6 @@ def update_order_item_price(item_id: str, price: float, tenant_id: str, reason: 
         update_data["price_override_reason"] = reason
 
     supabase.update("order_items", f"id=eq.{item_id}", update_data)
-
-    order_id = rows[0]["order_id"]
     _recalculate_order_totals(order_id)
 
 
