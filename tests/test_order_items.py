@@ -142,10 +142,17 @@ class TestUpdateKitchenStatus:
 class TestUpdatePaymentStatus:
     _valid_body = {"itemIds": ["item-1", "item-2"], "status": "paid"}
 
+    @staticmethod
+    def _ownership_rows(*item_ids: str) -> list:
+        return [{"id": iid, "order": {"tenant_id": VALID_TENANT_ID}} for iid in item_ids]
+
     def test_update_payment_status_returns_200(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            mock_sb.select.return_value = []  # auto_close_if_complete returns early
+            mock_sb.select.side_effect = [
+                self._ownership_rows("item-1", "item-2"),  # ownership check
+                [],  # auto_close: no orders
+            ]
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.status_code == 200
@@ -153,7 +160,10 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_returns_null_data_envelope(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            mock_sb.select.return_value = []
+            mock_sb.select.side_effect = [
+                self._ownership_rows("item-1", "item-2"),
+                [],
+            ]
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.json() == {"data": None, "error": None}
@@ -162,7 +172,10 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            mock_sb.select.return_value = []
+            if status == "paid":
+                mock_sb.select.side_effect = [self._ownership_rows("item-1"), []]
+            else:
+                mock_sb.select.return_value = self._ownership_rows("item-1")
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["item-1"], "status": status},
@@ -207,6 +220,7 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_calls_update_with_in_clause(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
+            mock_sb.select.return_value = self._ownership_rows("item-a", "item-b")
             client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["item-a", "item-b"], "status": "assigned"},
@@ -223,13 +237,17 @@ class TestUpdatePaymentStatus:
         """Payment-status endpoint has no auth requirement."""
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            mock_sb.select.return_value = []
+            mock_sb.select.side_effect = [
+                self._ownership_rows("item-1", "item-2"),
+                [],
+            ]
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
         # No Authorization header, must still succeed
         assert resp.status_code == 200
 
     def test_update_payment_status_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = self._ownership_rows("item-1", "item-2")
             mock_sb.update.side_effect = RuntimeError("update error")
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
@@ -239,12 +257,28 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_single_item(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            mock_sb.select.return_value = []
+            mock_sb.select.side_effect = [
+                self._ownership_rows("single-item-id"),
+                [],
+            ]
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["single-item-id"], "status": "paid"},
             )
         assert resp.status_code == 200
+
+    def test_payment_status_returns_404_when_item_not_found(self, client: TestClient):
+        """If any item_id doesn't exist in DB, the request is rejected."""
+        with patch("app.services.orders.supabase") as mock_sb:
+            # Only 1 of 2 items found
+            mock_sb.select.return_value = self._ownership_rows("item-1")
+            resp = client.patch(
+                "/order-items/payment-status",
+                json={"itemIds": ["item-1", "missing-id"], "status": "assigned"},
+            )
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
 
     def test_auto_close_triggered_when_all_items_paid(self, client: TestClient):
         from tests.conftest import make_order, make_order_item

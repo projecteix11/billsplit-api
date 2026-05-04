@@ -258,6 +258,8 @@ def update_items_payment_status(item_ids: list[str], status: str, tenant_id: str
         "order_items",
         f"select=id,order:orders(tenant_id)&id=in.({ids_csv})",
     )
+    if len(rows) != len(item_ids):
+        raise ValueError("one or more order items not found")
     for row in rows:
         if row.get("order", {}).get("tenant_id") != tenant_id:
             raise ValueError(f"order item {row['id']} does not belong to this tenant")

@@ -113,7 +113,10 @@ class TestUnprotectedRoutes:
     def test_payment_status_no_auth_returns_200(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            mock_sb.select.return_value = []
+            mock_sb.select.side_effect = [
+                [{"id": "i-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # ownership
+                [],  # auto_close: no orders
+            ]
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["i-1"], "status": "paid"},
