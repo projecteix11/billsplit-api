@@ -131,7 +131,11 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
 
 def close_order(order_id: str) -> None:
     order = get_order_by_id(order_id)
-    if order is None:
+    # Guard: skip if not open — prevents double-close from wiping the next
+    # session's custom_dishes. custom_dishes are scoped to the active table
+    # session (table_id), not to a specific order, so the delete below is
+    # only safe when this order is still the active one.
+    if order is None or order.status != "open":
         return
     supabase.update("orders", f"id=eq.{order_id}", {
         "status": "closed",
@@ -158,7 +162,7 @@ def auto_close_if_complete(item_id: str) -> None:
     order_id = rows[0]["order_id"]
 
     order = get_order_by_id(order_id)
-    if not order or order.status != "open":
+    if not order or order.status != "open":  # close_order also guards this, but explicit here for clarity
         return
 
     all_done = all(
