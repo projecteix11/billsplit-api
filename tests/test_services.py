@@ -290,6 +290,129 @@ class TestCloseOrderService:
 
 
 # ---------------------------------------------------------------------------
+# Orders service – _maybe_close_order
+# ---------------------------------------------------------------------------
+
+class TestMaybeCloseOrder:
+    def test_closes_order_when_all_items_paid_and_delivered(self):
+        from app.services.orders import _maybe_close_order
+        item = make_order_item(payment_status="paid", kitchen_status="delivered")
+        order = make_order(items=[item])
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = [
+                [order],   # get_order_by_id inside _maybe_close_order
+                [order],   # get_order_by_id inside close_order
+            ]
+            mock_sb.update.return_value = None
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                mock_dish_sb.delete.return_value = None
+                _maybe_close_order("order-1")
+
+        order_update = mock_sb.update.call_args_list[0]
+        assert order_update[0][2]["status"] == "closed"
+
+    def test_does_not_close_when_item_not_paid(self):
+        from app.services.orders import _maybe_close_order
+        item = make_order_item(payment_status="assigned", kitchen_status="delivered")
+        order = make_order(items=[item])
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [order]
+            _maybe_close_order("order-1")
+
+        mock_sb.update.assert_not_called()
+
+    def test_does_not_close_when_item_not_delivered(self):
+        from app.services.orders import _maybe_close_order
+        item = make_order_item(payment_status="paid", kitchen_status="cooking")
+        order = make_order(items=[item])
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [order]
+            _maybe_close_order("order-1")
+
+        mock_sb.update.assert_not_called()
+
+    def test_closes_when_item_has_no_kitchen_status(self):
+        from app.services.orders import _maybe_close_order
+        item = make_order_item(payment_status="paid", kitchen_status=None)
+        order = make_order(items=[item])
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = [[order], [order]]
+            mock_sb.update.return_value = None
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                mock_dish_sb.delete.return_value = None
+                _maybe_close_order("order-1")
+
+        assert mock_sb.update.call_args_list[0][0][2]["status"] == "closed"
+
+    def test_skips_already_closed_order(self):
+        from app.services.orders import _maybe_close_order
+        order = make_order(status="closed", items=[])
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [order]
+            _maybe_close_order("order-1")
+
+        mock_sb.update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Orders service – auto_close_orders_for_items (batch)
+# ---------------------------------------------------------------------------
+
+class TestAutoCloseOrdersForItems:
+    def test_deduplicates_order_ids_single_close_call(self):
+        """Multiple items from the same order trigger only one close check."""
+        from app.services.orders import auto_close_orders_for_items
+        item = make_order_item(payment_status="paid", kitchen_status="delivered")
+        order = make_order(items=[item])
+        with patch("app.services.orders.supabase") as mock_sb:
+            # Batch select returns same order_id for 3 different items
+            mock_sb.select.side_effect = [
+                [{"order_id": "order-1"}, {"order_id": "order-1"}, {"order_id": "order-1"}],
+                [order],   # _maybe_close_order: get_order_by_id
+                [order],   # close_order: get_order_by_id
+            ]
+            mock_sb.update.return_value = None
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                mock_dish_sb.delete.return_value = None
+                auto_close_orders_for_items(["item-1", "item-2", "item-3"])
+
+        # Only one close_order call regardless of 3 items
+        orders_closed = [
+            c for c in mock_sb.update.call_args_list if c[0][0] == "orders"
+        ]
+        assert len(orders_closed) == 1
+
+    def test_handles_items_from_different_orders(self):
+        """Items from different orders each get their own close check."""
+        from app.services.orders import auto_close_orders_for_items
+        item_a = make_order_item(payment_status="paid", kitchen_status="delivered")
+        order_a = make_order(id="order-a", items=[item_a])
+        order_b = make_order(id="order-b", status="closed", items=[])  # already closed — skip
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.side_effect = [
+                [{"order_id": "order-a"}, {"order_id": "order-b"}],  # batch
+                [order_a],  # _maybe_close_order order-a
+                [order_a],  # close_order order-a
+                [order_b],  # _maybe_close_order order-b → status!=open, skip
+            ]
+            mock_sb.update.return_value = None
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                mock_dish_sb.delete.return_value = None
+                auto_close_orders_for_items(["item-a", "item-b"])
+
+        orders_closed = [
+            c for c in mock_sb.update.call_args_list if c[0][0] == "orders"
+        ]
+        assert len(orders_closed) == 1  # only order-a closed
+
+    def test_empty_list_does_nothing(self):
+        from app.services.orders import auto_close_orders_for_items
+        with patch("app.services.orders.supabase") as mock_sb:
+            auto_close_orders_for_items([])
+        mock_sb.select.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Orders service – update_items_payment_status edge cases
 # ---------------------------------------------------------------------------
 

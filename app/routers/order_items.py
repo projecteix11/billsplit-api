@@ -55,6 +55,8 @@ def update_payment_status(request: Request, body: PaymentStatusBody, _tenant_id:
         )
     try:
         svc.update_items_payment_status(body.itemIds, body.status)
+        if body.status == "paid":
+            svc.auto_close_orders_for_items(body.itemIds)
         log_event(LogFactory.order_lifecycle(
             "payment_status_changed", "",
             metadata={"item_ids": body.itemIds, "new_status": body.status},
