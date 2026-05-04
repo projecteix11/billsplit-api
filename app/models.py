@@ -240,6 +240,7 @@ class Order(BaseModel):
     created_at: str
     updated_at: str
     items: list[OrderItem] = []
+    tenant_id: Optional[str] = None
 
 
 class NewOrderItem(BaseModel):

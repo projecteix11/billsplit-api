@@ -403,6 +403,15 @@ class TestCloseOrder:
         mock_sb.update.assert_not_called()
         mock_dish_sb.delete.assert_not_called()
 
+    def test_close_order_returns_404_for_wrong_tenant(self, client: TestClient):
+        order = make_order(tenant_id="other-tenant-uuid")
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [order]
+            resp = client.patch("/orders/order-1/close")
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
     def test_close_order_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("update failed")

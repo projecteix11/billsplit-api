@@ -56,21 +56,25 @@ async def create_dish(request: Request, body: CreateDishBody, _user_id: str = De
 
 @router.patch("/dishes/{dish_id}")
 @limiter.limit("20/minute")
-def update_dish(request: Request, dish_id: str, body: UpdateDishBody, _user_id: str = Depends(require_auth)):
+def update_dish(request: Request, dish_id: str, body: UpdateDishBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.update_dish(dish_id, body)
+        svc.update_dish(dish_id, body, tenant_id)
         dish = svc.get_dish_by_id(dish_id)
         return {"data": dish.model_dump() if dish else None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
 @router.delete("/dishes/{dish_id}")
 @limiter.limit("20/minute")
-def delete_dish(request: Request, dish_id: str, _user_id: str = Depends(require_auth)):
+def delete_dish(request: Request, dish_id: str, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.delete_dish(dish_id)
+        svc.delete_dish(dish_id, tenant_id)
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
@@ -173,10 +177,13 @@ def set_dish_allergens(
     dish_id: str,
     body: SetDishAllergensBody,
     _user_id: str = Depends(require_auth),
+    tenant_id: str = Depends(get_current_tenant),
 ):
     try:
-        svc.set_dish_allergens(dish_id, body.allergen_ids)
+        svc.set_dish_allergens(dish_id, body.allergen_ids, tenant_id)
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
@@ -217,10 +224,13 @@ def update_dish_ingredient(
     ingredient_id: str,
     body: UpdateDishIngredientBody,
     _user_id: str = Depends(require_auth),
+    tenant_id: str = Depends(get_current_tenant),
 ):
     try:
-        svc.update_dish_ingredient(dish_id, ingredient_id, body)
+        svc.update_dish_ingredient(dish_id, ingredient_id, body, tenant_id)
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
@@ -232,10 +242,13 @@ def delete_dish_ingredient(
     dish_id: str,
     ingredient_id: str,
     _user_id: str = Depends(require_auth),
+    tenant_id: str = Depends(get_current_tenant),
 ):
     try:
-        svc.delete_dish_ingredient(dish_id, ingredient_id)
+        svc.delete_dish_ingredient(dish_id, ingredient_id, tenant_id)
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 

@@ -129,7 +129,7 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
     })
 
 
-def close_order(order_id: str) -> None:
+def close_order(order_id: str, tenant_id: str | None = None) -> None:
     order = get_order_by_id(order_id)
     # Guard: skip if not open — prevents double-close from wiping the next
     # session's custom_dishes. custom_dishes are scoped to the active table
@@ -137,6 +137,8 @@ def close_order(order_id: str) -> None:
     # only safe when this order is still the active one.
     if order is None or order.status != "open":
         return
+    if tenant_id and order.tenant_id != tenant_id:
+        raise ValueError("order does not belong to this tenant")
     supabase.update("orders", f"id=eq.{order_id}", {
         "status": "closed",
         "updated_at": datetime.now(timezone.utc).isoformat(),

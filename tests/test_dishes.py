@@ -12,7 +12,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from tests.conftest import make_dish, make_category
+from tests.conftest import make_dish, make_category, VALID_TENANT_ID, VALID_TOKEN, VALID_USER_ID
 
 
 # ---------------------------------------------------------------------------
@@ -160,3 +160,105 @@ class TestGetCategories:
         body = resp.json()
         assert body["data"] is None
         assert "connection timeout" in body["error"]
+
+
+def _auth_headers() -> dict:
+    return {"Authorization": f"Bearer {VALID_TOKEN}"}
+
+
+# ---------------------------------------------------------------------------
+# PATCH /dishes/{dish_id} — ownership check
+# ---------------------------------------------------------------------------
+
+class TestUpdateDish:
+    def test_update_dish_returns_200_for_correct_tenant(self, client: TestClient):
+        dish = make_dish()
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.side_effect = [
+                [{"id": "dish-1"}],  # _assert_dish_owner
+                [dish],              # get_dish_by_id after update
+            ]
+            mock_sb.update.return_value = None
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch("/dishes/dish-1", json={"name": "Updated"}, headers=_auth_headers())
+
+        assert resp.status_code == 200
+
+    def test_update_dish_returns_404_for_wrong_tenant(self, client: TestClient):
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.return_value = []  # _assert_dish_owner finds nothing
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch("/dishes/dish-other", json={"name": "Hack"}, headers=_auth_headers())
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# DELETE /dishes/{dish_id} — ownership check
+# ---------------------------------------------------------------------------
+
+class TestDeleteDish:
+    def test_delete_dish_returns_200_for_correct_tenant(self, client: TestClient):
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.return_value = [{"id": "dish-1"}]  # _assert_dish_owner
+            mock_sb.delete.return_value = None
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.delete("/dishes/dish-1", headers=_auth_headers())
+
+        assert resp.status_code == 200
+
+    def test_delete_dish_returns_404_for_wrong_tenant(self, client: TestClient):
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.return_value = []  # _assert_dish_owner finds nothing
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.delete("/dishes/dish-other", headers=_auth_headers())
+
+        assert resp.status_code == 404
+        mock_sb.delete.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# PUT /dishes/{dish_id}/allergens — ownership check
+# ---------------------------------------------------------------------------
+
+class TestSetDishAllergens:
+    def test_set_allergens_returns_404_for_wrong_tenant(self, client: TestClient):
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.put("/dishes/dish-other/allergens", json={"allergen_ids": []}, headers=_auth_headers())
+
+        assert resp.status_code == 404
+        mock_sb.delete.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# PATCH/DELETE /dishes/{dish_id}/ingredients — ownership check
+# ---------------------------------------------------------------------------
+
+class TestDishIngredientOwnership:
+    def test_update_ingredient_returns_404_for_wrong_tenant(self, client: TestClient):
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch(
+                    "/dishes/dish-other/ingredients/ing-1",
+                    json={"name": "Hack"},
+                    headers=_auth_headers(),
+                )
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
+    def test_delete_ingredient_returns_404_for_wrong_tenant(self, client: TestClient):
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.delete(
+                    "/dishes/dish-other/ingredients/ing-1",
+                    headers=_auth_headers(),
+                )
+
+        assert resp.status_code == 404
+        mock_sb.delete.assert_not_called()

@@ -85,6 +85,7 @@ def make_order(**overrides) -> dict:
         "created_at": "2024-01-01T10:00:00+00:00",
         "updated_at": "2024-01-01T10:00:00+00:00",
         "items": [],
+        "tenant_id": VALID_TENANT_ID,
     }
     return {**base, **overrides}
 
