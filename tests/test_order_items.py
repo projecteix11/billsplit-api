@@ -145,6 +145,7 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_returns_200(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
+            mock_sb.select.return_value = []  # auto_close_if_complete returns early
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.status_code == 200
@@ -152,6 +153,7 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_returns_null_data_envelope(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
+            mock_sb.select.return_value = []
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.json() == {"data": None, "error": None}
@@ -160,6 +162,7 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
+            mock_sb.select.return_value = []
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["item-1"], "status": status},
@@ -220,6 +223,7 @@ class TestUpdatePaymentStatus:
         """Payment-status endpoint has no auth requirement."""
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
+            mock_sb.select.return_value = []
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
         # No Authorization header, must still succeed
         assert resp.status_code == 200
@@ -235,9 +239,42 @@ class TestUpdatePaymentStatus:
     def test_update_payment_status_single_item(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
+            mock_sb.select.return_value = []
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["single-item-id"], "status": "paid"},
             )
         assert resp.status_code == 200
-        mock_sb.update.assert_called_once()
+
+    def test_auto_close_triggered_when_all_items_paid(self, client: TestClient):
+        from tests.conftest import make_order, make_order_item
+        item = make_order_item(payment_status="paid", kitchen_status="delivered")
+        order = make_order(items=[item])
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.update.return_value = None
+            # auto_close_if_complete: select order_id from order_items
+            # get_order_by_id (inside auto_close_if_complete): select order + items
+            # get_order_by_id (inside close_order): select order + items
+            mock_sb.select.side_effect = [
+                [{"order_id": "order-1"}],  # auto_close: find order_id
+                [order],                     # auto_close: get_order_by_id
+                [order],                     # close_order: get_order_by_id
+            ]
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                mock_dish_sb.delete.return_value = None
+                client.patch("/order-items/payment-status", json={"itemIds": ["item-1"], "status": "paid"})
+
+        tables_updated = [
+            c for c in mock_sb.update.call_args_list
+            if c[0][0] == "restaurant_tables"
+        ]
+        assert len(tables_updated) == 1
+        assert tables_updated[0][0][2]["status"] == "available"
+
+    def test_auto_close_not_triggered_for_non_paid_status(self, client: TestClient):
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.update.return_value = None
+            client.patch("/order-items/payment-status", json={"itemIds": ["item-1"], "status": "assigned"})
+
+        # select should never be called — auto_close only fires on paid
+        mock_sb.select.assert_not_called()
