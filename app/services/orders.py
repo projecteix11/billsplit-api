@@ -131,7 +131,7 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
 
 def close_order(order_id: str) -> None:
     order = get_order_by_id(order_id)
-    if order is None:
+    if order is None or order.status != "open":
         return
     supabase.update("orders", f"id=eq.{order_id}", {
         "status": "closed",
