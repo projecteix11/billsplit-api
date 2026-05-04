@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth
-from app.middleware.tenant import require_feature
+from app.middleware.tenant import require_feature, get_current_tenant
 from app.middleware.rate_limit import limiter
 from app.models import UpdateQuantityBody, UpdatePriceBody
 from app.services import orders as svc
@@ -68,41 +68,47 @@ def update_payment_status(request: Request, body: PaymentStatusBody, _tenant_id:
 
 @router.delete("/order-items/{item_id}")
 @limiter.limit("20/minute")
-def delete_order_item(request: Request, item_id: str, _user_id: str = Depends(require_auth)):
+def delete_order_item(request: Request, item_id: str, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.delete_order_item(item_id)
+        svc.delete_order_item(item_id, tenant_id)
         log_event(LogFactory.order_lifecycle(
             "order_item_deleted", "",
             metadata={"item_id": item_id},
         ))
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
 @router.patch("/order-items/{item_id}/quantity")
 @limiter.limit("20/minute")
-def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBody, _user_id: str = Depends(require_auth)):
+def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.update_order_item_quantity(item_id, body.quantity)
+        svc.update_order_item_quantity(item_id, body.quantity, tenant_id)
         log_event(LogFactory.order_lifecycle(
             "order_item_quantity_updated", "",
             metadata={"item_id": item_id, "new_quantity": body.quantity},
         ))
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
 @router.patch("/order-items/{item_id}/price")
 @limiter.limit("20/minute")
-def update_item_price(request: Request, item_id: str, body: UpdatePriceBody, _user_id: str = Depends(require_auth)):
+def update_item_price(request: Request, item_id: str, body: UpdatePriceBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.update_order_item_price(item_id, body.price, reason=body.reason)
+        svc.update_order_item_price(item_id, body.price, tenant_id, reason=body.reason)
         log_event(LogFactory.order_lifecycle(
             "order_item_price_updated", "",
             metadata={"item_id": item_id, "new_price": body.price, "reason": body.reason},
         ))
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
