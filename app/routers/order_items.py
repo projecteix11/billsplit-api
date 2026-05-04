@@ -47,7 +47,7 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
 
 @router.patch("/order-items/payment-status")
 @limiter.limit("20/minute")
-def update_payment_status(request: Request, body: PaymentStatusBody, _tenant_id: str = Depends(require_feature("payments"))):
+def update_payment_status(request: Request, body: PaymentStatusBody, tenant_id: str = Depends(require_feature("payments"))):
     if not body.itemIds:
         return JSONResponse(status_code=400, content={"data": None, "error": "itemIds[] is required"})
     if body.status not in VALID_PAYMENT_STATUSES:
@@ -56,7 +56,7 @@ def update_payment_status(request: Request, body: PaymentStatusBody, _tenant_id:
             content={"data": None, "error": "status must be one of: unassigned, assigned, paid"},
         )
     try:
-        svc.update_items_payment_status(body.itemIds, body.status)
+        svc.update_items_payment_status(body.itemIds, body.status, tenant_id)
         if body.status == "paid":
             svc.auto_close_orders_for_items(body.itemIds)
         log_event(LogFactory.order_lifecycle(
@@ -64,6 +64,8 @@ def update_payment_status(request: Request, body: PaymentStatusBody, _tenant_id:
             metadata={"item_ids": body.itemIds, "new_status": body.status},
         ))
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 

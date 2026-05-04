@@ -420,14 +420,20 @@ class TestUpdateItemsPaymentStatus:
     def test_does_nothing_with_empty_list(self):
         from app.services import orders as svc
         with patch("app.services.orders.supabase") as mock_sb:
-            svc.update_items_payment_status([], "paid")
+            svc.update_items_payment_status([], "paid", VALID_TENANT_ID)
         mock_sb.update.assert_not_called()
+        mock_sb.select.assert_not_called()
 
     def test_builds_in_clause_correctly(self):
         from app.services import orders as svc
         with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [
+                {"id": "a", "order": {"tenant_id": VALID_TENANT_ID}},
+                {"id": "b", "order": {"tenant_id": VALID_TENANT_ID}},
+                {"id": "c", "order": {"tenant_id": VALID_TENANT_ID}},
+            ]
             mock_sb.update.return_value = None
-            svc.update_items_payment_status(["a", "b", "c"], "paid")
+            svc.update_items_payment_status(["a", "b", "c"], "paid", VALID_TENANT_ID)
 
         query = mock_sb.update.call_args[0][1]
         assert "id=in." in query
@@ -438,11 +444,20 @@ class TestUpdateItemsPaymentStatus:
     def test_updates_correct_payment_status(self):
         from app.services import orders as svc
         with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [{"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}}]
             mock_sb.update.return_value = None
-            svc.update_items_payment_status(["item-1"], "assigned")
+            svc.update_items_payment_status(["item-1"], "assigned", VALID_TENANT_ID)
 
         body = mock_sb.update.call_args[0][2]
         assert body["payment_status"] == "assigned"
+
+    def test_raises_for_item_from_other_tenant(self):
+        from app.services import orders as svc
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [{"id": "item-1", "order": {"tenant_id": "other-tenant"}}]
+            with pytest.raises(ValueError):
+                svc.update_items_payment_status(["item-1"], "paid", VALID_TENANT_ID)
+        mock_sb.update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
