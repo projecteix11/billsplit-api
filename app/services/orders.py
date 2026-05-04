@@ -136,6 +136,11 @@ def close_order(order_id: str) -> None:
         "updated_at": datetime.now(timezone.utc).isoformat(),
     })
     if order:
+        supabase.update(
+            "restaurant_tables",
+            f"id=eq.{order.table_id}",
+            {"status": "available", "active_order_id": None},
+        )
         dish_svc.delete_custom_dishes_for_table(order.table_id)
 
 

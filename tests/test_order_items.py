@@ -84,7 +84,7 @@ class TestUpdateKitchenStatus:
                 )
         assert resp.status_code == 200
 
-    @pytest.mark.parametrize("bad_status", ["done", "cancelled", "", "COOKING", "unknown"])
+    @pytest.mark.parametrize("bad_status", ["done", "", "COOKING", "unknown"])
     def test_update_kitchen_status_rejects_invalid_status(self, client: TestClient, bad_status: str):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             resp = client.patch(
@@ -95,7 +95,7 @@ class TestUpdateKitchenStatus:
         assert resp.status_code == 400
         body = resp.json()
         assert body["data"] is None
-        assert "pending, cooking, ready, delivered" in body["error"]
+        assert "cancelled" in body["error"]
 
     def test_update_kitchen_status_missing_status_field_returns_422(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):

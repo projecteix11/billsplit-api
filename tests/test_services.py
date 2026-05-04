@@ -276,11 +276,16 @@ class TestCloseOrderService:
                 mock_dish_sb.delete.return_value = None
                 svc.close_order("order-uuid")
 
-        call_args = mock_sb.update.call_args
-        assert call_args[0][0] == "orders"
-        assert "order-uuid" in call_args[0][1]
-        assert call_args[0][2]["status"] == "closed"
-        assert "updated_at" in call_args[0][2]
+        order_call = mock_sb.update.call_args_list[0]
+        assert order_call[0][0] == "orders"
+        assert "order-uuid" in order_call[0][1]
+        assert order_call[0][2]["status"] == "closed"
+        assert "updated_at" in order_call[0][2]
+
+        table_call = mock_sb.update.call_args_list[1]
+        assert table_call[0][0] == "restaurant_tables"
+        assert table_call[0][2]["status"] == "available"
+        assert table_call[0][2]["active_order_id"] is None
 
 
 # ---------------------------------------------------------------------------
