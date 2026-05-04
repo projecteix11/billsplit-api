@@ -252,12 +252,12 @@ class TestUpdatePaymentStatus:
         order = make_order(items=[item])
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            # auto_close_if_complete: select order_id from order_items
-            # get_order_by_id (inside auto_close_if_complete): select order + items
-            # get_order_by_id (inside close_order): select order + items
+            # auto_close_orders_for_items: 1 batch SELECT for all item_ids
+            # _maybe_close_order: get_order_by_id
+            # close_order: get_order_by_id
             mock_sb.select.side_effect = [
-                [{"order_id": "order-1"}],  # auto_close: find order_id
-                [order],                     # auto_close: get_order_by_id
+                [{"order_id": "order-1"}],  # batch select order_ids
+                [order],                     # _maybe_close_order: get_order_by_id
                 [order],                     # close_order: get_order_by_id
             ]
             with patch("app.services.dishes.supabase") as mock_dish_sb:
