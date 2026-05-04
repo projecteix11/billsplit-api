@@ -72,11 +72,13 @@ def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
 
 @router.patch("/orders/{order_id}/close")
 @limiter.limit("20/minute")
-def close_order(request: Request, order_id: str):
+def close_order(request: Request, order_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.close_order(order_id)
+        svc.close_order(order_id, tenant_id)
         log_event(LogFactory.order_lifecycle("order_closed", order_id))
         return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Order not found"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 

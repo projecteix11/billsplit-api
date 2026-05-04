@@ -72,7 +72,14 @@ def create_dish(body: CreateDishBody, tenant_id: str) -> DishFull:
     return dish
 
 
-def update_dish(dish_id: str, body: UpdateDishBody) -> None:
+def _assert_dish_owner(dish_id: str, tenant_id: str) -> None:
+    rows = supabase.select("dishes", f"select=id&id=eq.{dish_id}&tenant_id=eq.{tenant_id}&limit=1")
+    if not rows:
+        raise ValueError(f"dish {dish_id} not found")
+
+
+def update_dish(dish_id: str, body: UpdateDishBody, tenant_id: str) -> None:
+    _assert_dish_owner(dish_id, tenant_id)
     data = body.model_dump(exclude_none=True)
     # Map API field → DB field
     if "image" in data:
@@ -82,7 +89,8 @@ def update_dish(dish_id: str, body: UpdateDishBody) -> None:
     supabase.update("dishes", f"id=eq.{dish_id}", data)
 
 
-def delete_dish(dish_id: str) -> None:
+def delete_dish(dish_id: str, tenant_id: str) -> None:
+    _assert_dish_owner(dish_id, tenant_id)
     supabase.delete("dishes", f"id=eq.{dish_id}")
 
 
@@ -157,8 +165,9 @@ def create_allergen(body: CreateAllergenBody) -> Allergen:
     return Allergen(id=row["id"], name=row["name"], icon=row.get("icon"))
 
 
-def set_dish_allergens(dish_id: str, allergen_ids: list[str]) -> None:
+def set_dish_allergens(dish_id: str, allergen_ids: list[str], tenant_id: str) -> None:
     """Replace all allergens for a dish."""
+    _assert_dish_owner(dish_id, tenant_id)
     supabase.delete("dish_allergens", f"dish_id=eq.{dish_id}")
     if allergen_ids:
         rows = [{"dish_id": dish_id, "allergen_id": aid} for aid in allergen_ids]
@@ -225,8 +234,9 @@ def create_dish_ingredient(dish_id: str, body: CreateDishIngredientBody, tenant_
 
 
 def update_dish_ingredient(
-    dish_id: str, ingredient_id: str, body: UpdateDishIngredientBody
+    dish_id: str, ingredient_id: str, body: UpdateDishIngredientBody, tenant_id: str
 ) -> None:
+    _assert_dish_owner(dish_id, tenant_id)
     updates = body.model_dump(exclude_none=True)
     if not updates:
         return
@@ -254,8 +264,9 @@ def update_dish_ingredient(
         )
 
 
-def delete_dish_ingredient(dish_id: str, ingredient_id: str) -> None:
+def delete_dish_ingredient(dish_id: str, ingredient_id: str, tenant_id: str) -> None:
     """Remove ingredient from dish (junction only)."""
+    _assert_dish_owner(dish_id, tenant_id)
     supabase.delete(
         "dish_ingredients",
         f"dish_id=eq.{dish_id}&ingredient_id=eq.{ingredient_id}",
