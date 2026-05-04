@@ -78,6 +78,7 @@ class TestAuthOnKitchenStatus:
     def test_valid_token_allows_update(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]
                 mock_sb.update.return_value = None
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",

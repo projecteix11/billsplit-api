@@ -24,9 +24,13 @@ def _auth_headers(token: str = VALID_TOKEN) -> dict:
 class TestUpdateKitchenStatus:
     _valid_body = {"status": "cooking"}
 
+    def _owner_row(self) -> list:
+        return [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]
+
     def test_update_kitchen_status_returns_200_with_valid_auth(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = self._owner_row()
                 mock_sb.update.return_value = None
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
@@ -39,6 +43,7 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_returns_null_data_envelope(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = self._owner_row()
                 mock_sb.update.return_value = None
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
@@ -76,6 +81,7 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = self._owner_row()
                 mock_sb.update.return_value = None
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
@@ -106,9 +112,34 @@ class TestUpdateKitchenStatus:
             )
         assert resp.status_code == 422
 
+    def test_update_kitchen_status_returns_404_for_wrong_tenant(self, client: TestClient):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+            with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+                resp = client.patch(
+                    "/order-items/item-1/kitchen-status",
+                    json=self._valid_body,
+                    headers=_auth_headers(),
+                )
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
+    def test_update_kitchen_status_returns_404_when_item_not_found(self, client: TestClient):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+            with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = []
+                resp = client.patch(
+                    "/order-items/nonexistent/kitchen-status",
+                    json=self._valid_body,
+                    headers=_auth_headers(),
+                )
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
     def test_update_kitchen_status_calls_update_correct_item(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = self._owner_row()
                 mock_sb.update.return_value = None
                 client.patch(
                     "/order-items/my-item-uuid/kitchen-status",
@@ -124,6 +155,7 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_returns_500_on_db_error(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.supabase") as mock_sb:
+                mock_sb.select.return_value = self._owner_row()
                 mock_sb.update.side_effect = RuntimeError("db failure")
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",

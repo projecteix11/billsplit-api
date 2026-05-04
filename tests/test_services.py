@@ -453,8 +453,9 @@ class TestUpdateItemKitchenStatus:
     def test_calls_update_with_correct_args(self):
         from app.services import orders as svc
         with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]
             mock_sb.update.return_value = None
-            svc.update_item_kitchen_status("item-xyz", "ready")
+            svc.update_item_kitchen_status("item-xyz", "ready", VALID_TENANT_ID)
 
         call_args = mock_sb.update.call_args
         assert call_args[0][0] == "order_items"
