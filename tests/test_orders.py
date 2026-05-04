@@ -376,6 +376,22 @@ class TestCloseOrder:
         assert "order-1" in call_args[0][1]
         assert call_args[0][2]["status"] == "closed"
 
+    def test_close_order_resets_table_status(self, client: TestClient):
+        order = make_order()
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [order]
+            mock_sb.update.return_value = None
+            with patch("app.services.dishes.supabase") as mock_dish_sb:
+                mock_dish_sb.delete.return_value = None
+                client.patch("/orders/order-1/close")
+
+        # Second update call resets the table
+        table_call = mock_sb.update.call_args_list[1]
+        assert table_call[0][0] == "restaurant_tables"
+        assert "table-1" in table_call[0][1]
+        assert table_call[0][2]["status"] == "available"
+        assert table_call[0][2]["active_order_id"] is None
+
     def test_close_order_returns_500_on_db_error(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = RuntimeError("update failed")
