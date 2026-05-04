@@ -143,6 +143,19 @@ class TestUpdateSection:
         assert resp.status_code == 404
         mock_sb.update.assert_not_called()
 
+    def test_returns_404_when_section_not_found(self, client: TestClient):
+        with patch("app.services.daily_menus.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch(
+                    "/daily-menu-sections/nonexistent",
+                    json={"name": "Hack"},
+                    headers=_auth_headers(),
+                )
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # DELETE /daily-menu-sections/{section_id}
@@ -225,6 +238,19 @@ class TestUpdateItem:
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch(
                     "/daily-menu-items/item-1",
+                    json={"name": "Hack"},
+                    headers=_auth_headers(),
+                )
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
+    def test_returns_404_when_item_not_found(self, client: TestClient):
+        with patch("app.services.daily_menus.supabase") as mock_sb:
+            mock_sb.select.return_value = []
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch(
+                    "/daily-menu-items/nonexistent",
                     json={"name": "Hack"},
                     headers=_auth_headers(),
                 )
