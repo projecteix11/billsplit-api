@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from app.db import supabase
 from app.models import NewOrderItem, Order, OrderItem
 from app.services import dishes as dish_svc
+from app.services import stock as stock_svc
 
 TAX_RATE_ES = 10.0  # Spain restaurant tax rate (%)
 
@@ -100,6 +101,9 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem], te
 
     _build_and_insert_items(order.id, items, precomputed=precomputed)
 
+    # Deduct ingredients from stock
+    stock_svc.deduct_stock_for_items(items, tenant_id)
+
     supabase.update(
         "restaurant_tables",
         f"id=eq.{table_id}",
@@ -116,6 +120,10 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
     existing = get_order_by_id(order_id)
     if existing is None:
         return
+
+    # Deduct ingredients from stock
+    if existing.tenant_id:
+        stock_svc.deduct_stock_for_items(items, existing.tenant_id)
 
     subtotal = _calculate_subtotal_from_items(existing.items)
     tax_amount = _calculate_tax(subtotal)
@@ -221,6 +229,22 @@ def _assert_item_owner(item_id: str, tenant_id: str) -> str:
 def delete_order_item(item_id: str, tenant_id: str) -> None:
     """Delete a single order item and recalculate parent order totals."""
     order_id = _assert_item_owner(item_id, tenant_id)
+
+    # Get item details before deleting to restore stock
+    item_rows = supabase.select("order_items", f"select=dish_id,quantity&id=eq.{item_id}&limit=1")
+    if item_rows:
+        item = item_rows[0]
+        if item.get("dish_id"):
+            # Create a temporary NewOrderItem to use with stock restoration
+            temp_item = NewOrderItem(
+                dish_name="",
+                dish_price=0,
+                quantity=item.get("quantity", 0),
+                dish_id=item.get("dish_id")
+            )
+            # Restore stock by reversing the deduction
+            stock_svc.restore_stock_for_items([temp_item], tenant_id)
+
     supabase.delete("order_items", f"id=eq.{item_id}")
     _recalculate_order_totals(order_id)
 
@@ -228,6 +252,30 @@ def delete_order_item(item_id: str, tenant_id: str) -> None:
 def update_order_item_quantity(item_id: str, quantity: int, tenant_id: str) -> None:
     """Update the quantity of a single order item and recalculate parent order totals."""
     order_id = _assert_item_owner(item_id, tenant_id)
+
+    # Get old quantity to handle stock adjustment
+    item_rows = supabase.select("order_items", f"select=dish_id,quantity&id=eq.{item_id}&limit=1")
+    if item_rows:
+        item = item_rows[0]
+        old_qty = float(item.get("quantity", 0))
+        new_qty = float(quantity)
+        qty_diff = new_qty - old_qty
+
+        if item.get("dish_id") and qty_diff != 0:
+            # If quantity decreased, restore stock; if increased, deduct more
+            temp_item = NewOrderItem(
+                dish_name="",
+                dish_price=0,
+                quantity=abs(qty_diff),
+                dish_id=item.get("dish_id")
+            )
+            if qty_diff > 0:
+                # Quantity increased - deduct more stock
+                stock_svc.deduct_stock_for_items([temp_item], tenant_id)
+            else:
+                # Quantity decreased - restore stock
+                stock_svc.restore_stock_for_items([temp_item], tenant_id)
+
     supabase.update("order_items", f"id=eq.{item_id}", {"quantity": quantity})
     _recalculate_order_totals(order_id)
 
