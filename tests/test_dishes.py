@@ -223,6 +223,15 @@ class TestDeleteDish:
 # ---------------------------------------------------------------------------
 
 class TestSetDishAllergens:
+    def test_set_allergens_returns_200_for_correct_tenant(self, client: TestClient):
+        with patch("app.services.dishes.supabase") as mock_sb:
+            mock_sb.select.return_value = [{"id": "dish-1"}]  # _assert_dish_owner
+            mock_sb.delete.return_value = None
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.put("/dishes/dish-1/allergens", json={"allergen_ids": []}, headers=_auth_headers())
+
+        assert resp.status_code == 200
+
     def test_set_allergens_returns_404_for_wrong_tenant(self, client: TestClient):
         with patch("app.services.dishes.supabase") as mock_sb:
             mock_sb.select.return_value = []
