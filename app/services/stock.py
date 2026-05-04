@@ -1,4 +1,5 @@
 """Stock/inventory deduction when orders are placed."""
+from urllib.parse import quote
 from app.db import supabase
 from app.models import NewOrderItem
 
@@ -12,7 +13,7 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
     3. Find matching stock_items by ingredient name
     4. Deduct quantity from stock_items.current_quantity
     """
-    if not items:
+    if not items or not tenant_id:
         return
 
     # Collect all unique dish IDs with their quantities
@@ -30,7 +31,7 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
         ing_rows = supabase.select(
             "dish_ingredients",
             f"select=ingredient_id,ingredient:ingredients(id,name)"
-            f"&dish_id=eq.{dish_id}",
+            f"&dish_id=eq.{quote(dish_id, safe='')}",
         )
 
         if not ing_rows:
@@ -46,19 +47,15 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             if not ingredient_name:
                 continue
 
+            # Escape values for Supabase query
+            escaped_name = quote(ingredient_name, safe='')
+            escaped_tenant = quote(tenant_id, safe='')
+
             # Find the stock_item for this ingredient in this tenant by name
-            # Use exact match first, fall back to case-insensitive
             stock_rows = supabase.select(
                 "stock_items",
-                f"select=id,current_quantity&name=eq.{ingredient_name}&tenant_id=eq.{tenant_id}&limit=1",
+                f"select=id,current_quantity,tenant_id&name=eq.{escaped_name}&tenant_id=eq.{escaped_tenant}&limit=1",
             )
-
-            # If no exact match, try case-insensitive search
-            if not stock_rows:
-                stock_rows = supabase.select(
-                    "stock_items",
-                    f"select=id,current_quantity&name=ilike.*{ingredient_name}*&tenant_id=eq.{tenant_id}&limit=1",
-                )
 
             if not stock_rows:
                 continue
@@ -70,7 +67,7 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             # Update stock
             supabase.update(
                 "stock_items",
-                f"id=eq.{stock_item['id']}",
+                f"id=eq.{quote(stock_item['id'], safe='')}",
                 {"current_quantity": new_qty}
             )
 
@@ -81,7 +78,7 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
                 "quantity": -order_qty,
                 "quantity_before": current_qty,
                 "quantity_after": new_qty,
-                "notes": f"Consumo automático: orden",
+                "notes": f"Consumo automático",
                 "tenant_id": tenant_id,
             }
             supabase.insert("stock_movements", movement_row, return_result=False)
@@ -92,7 +89,7 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
 
     Used when items are deleted or quantity is reduced.
     """
-    if not items:
+    if not items or not tenant_id:
         return
 
     # Collect all unique dish IDs with their quantities
@@ -110,7 +107,7 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
         ing_rows = supabase.select(
             "dish_ingredients",
             f"select=ingredient_id,ingredient:ingredients(id,name)"
-            f"&dish_id=eq.{dish_id}",
+            f"&dish_id=eq.{quote(dish_id, safe='')}",
         )
 
         if not ing_rows:
@@ -126,18 +123,15 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             if not ingredient_name:
                 continue
 
+            # Escape values for Supabase query
+            escaped_name = quote(ingredient_name, safe='')
+            escaped_tenant = quote(tenant_id, safe='')
+
             # Find the stock_item for this ingredient in this tenant by name
             stock_rows = supabase.select(
                 "stock_items",
-                f"select=id,current_quantity&name=eq.{ingredient_name}&tenant_id=eq.{tenant_id}&limit=1",
+                f"select=id,current_quantity,tenant_id&name=eq.{escaped_name}&tenant_id=eq.{escaped_tenant}&limit=1",
             )
-
-            # If no exact match, try case-insensitive search
-            if not stock_rows:
-                stock_rows = supabase.select(
-                    "stock_items",
-                    f"select=id,current_quantity&name=ilike.*{ingredient_name}*&tenant_id=eq.{tenant_id}&limit=1",
-                )
 
             if not stock_rows:
                 continue
@@ -149,7 +143,7 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             # Update stock
             supabase.update(
                 "stock_items",
-                f"id=eq.{stock_item['id']}",
+                f"id=eq.{quote(stock_item['id'], safe='')}",
                 {"current_quantity": new_qty}
             )
 
@@ -160,7 +154,7 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
                 "quantity": restore_qty,
                 "quantity_before": current_qty,
                 "quantity_after": new_qty,
-                "notes": f"Devolución automática: orden cancelada",
+                "notes": f"Devolución automática",
                 "tenant_id": tenant_id,
             }
             supabase.insert("stock_movements", movement_row, return_result=False)
