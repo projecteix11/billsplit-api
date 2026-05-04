@@ -250,10 +250,18 @@ def update_order_item_price(item_id: str, price: float, tenant_id: str, reason: 
     _recalculate_order_totals(order_id)
 
 
-def update_items_payment_status(item_ids: list[str], status: str) -> None:
+def update_items_payment_status(item_ids: list[str], status: str, tenant_id: str) -> None:
     if not item_ids:
         return
-    in_list = "(" + ",".join(item_ids) + ")"
+    ids_csv = ",".join(item_ids)
+    rows = supabase.select(
+        "order_items",
+        f"select=id,order:orders(tenant_id)&id=in.({ids_csv})",
+    )
+    for row in rows:
+        if row.get("order", {}).get("tenant_id") != tenant_id:
+            raise ValueError(f"order item {row['id']} does not belong to this tenant")
+    in_list = "(" + ids_csv + ")"
     supabase.update("order_items", f"id=in.{in_list}", {"payment_status": status})
 
 

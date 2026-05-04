@@ -252,10 +252,12 @@ class TestUpdatePaymentStatus:
         order = make_order(items=[item])
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
-            # auto_close_orders_for_items: 1 batch SELECT for all item_ids
+            # update_items_payment_status: ownership SELECT
+            # auto_close_orders_for_items: batch SELECT for order_ids
             # _maybe_close_order: get_order_by_id
             # close_order: get_order_by_id
             mock_sb.select.side_effect = [
+                [{"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # ownership check
                 [{"order_id": "order-1"}],  # batch select order_ids
                 [order],                     # _maybe_close_order: get_order_by_id
                 [order],                     # close_order: get_order_by_id
@@ -274,10 +276,40 @@ class TestUpdatePaymentStatus:
     def test_auto_close_not_triggered_for_non_paid_status(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.update.return_value = None
+            # ownership SELECT still fires; auto_close SELECT does not
+            mock_sb.select.return_value = [{"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}}]
             client.patch("/order-items/payment-status", json={"itemIds": ["item-1"], "status": "assigned"})
 
-        # select should never be called — auto_close only fires on paid
-        mock_sb.select.assert_not_called()
+        # Only the ownership SELECT should have been called, not the auto_close batch SELECT
+        select_queries = [c[0][1] for c in mock_sb.select.call_args_list]
+        assert all("order:orders(tenant_id)" in q for q in select_queries)
+        assert not any("select=order_id" in q for q in select_queries)
+
+    def test_payment_status_returns_404_for_wrong_tenant(self, client: TestClient):
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [{"id": "item-1", "order": {"tenant_id": "other-tenant"}}]
+            resp = client.patch(
+                "/order-items/payment-status",
+                json={"itemIds": ["item-1"], "status": "assigned"},
+            )
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
+
+    def test_payment_status_mixed_tenants_returns_404(self, client: TestClient):
+        """If any item in the batch belongs to another tenant, the whole request is rejected."""
+        with patch("app.services.orders.supabase") as mock_sb:
+            mock_sb.select.return_value = [
+                {"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}},
+                {"id": "item-2", "order": {"tenant_id": "other-tenant"}},
+            ]
+            resp = client.patch(
+                "/order-items/payment-status",
+                json={"itemIds": ["item-1", "item-2"], "status": "paid"},
+            )
+
+        assert resp.status_code == 404
+        mock_sb.update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
