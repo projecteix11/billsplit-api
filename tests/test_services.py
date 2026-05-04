@@ -284,6 +284,7 @@ class TestCloseOrderService:
 
         table_call = mock_sb.update.call_args_list[1]
         assert table_call[0][0] == "restaurant_tables"
+        assert "table-1" in table_call[0][1]
         assert table_call[0][2]["status"] == "available"
         assert table_call[0][2]["active_order_id"] is None
 

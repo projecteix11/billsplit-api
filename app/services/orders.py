@@ -131,17 +131,18 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
 
 def close_order(order_id: str) -> None:
     order = get_order_by_id(order_id)
+    if order is None:
+        return
     supabase.update("orders", f"id=eq.{order_id}", {
         "status": "closed",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     })
-    if order:
-        supabase.update(
-            "restaurant_tables",
-            f"id=eq.{order.table_id}",
-            {"status": "available", "active_order_id": None},
-        )
-        dish_svc.delete_custom_dishes_for_table(order.table_id)
+    supabase.update(
+        "restaurant_tables",
+        f"id=eq.{order.table_id}",
+        {"status": "available", "active_order_id": None},
+    )
+    dish_svc.delete_custom_dishes_for_table(order.table_id)
 
 
 def update_item_kitchen_status(item_id: str, status: str) -> None:
