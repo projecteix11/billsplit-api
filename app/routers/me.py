@@ -12,6 +12,12 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
     role = getattr(request.state, "role", None)
     tenant_id = getattr(request.state, "tenant_id", None)
 
+    user_rows = supabase.select(
+        "users",
+        f"select=avatar_url&id=eq.{user_id}&limit=1",
+    )
+    avatar_url = user_rows[0]["avatar_url"] if user_rows else None
+
     if role == "developer":
         return {
             "data": {
@@ -19,6 +25,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
                 "tenant": None,
                 "role": role,
                 "is_platform_user": True,
+                "avatar_url": avatar_url,
             },
             "error": None,
         }
@@ -48,6 +55,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
             },
             "role": role,
             "is_platform_user": False,
+            "avatar_url": avatar_url,
         },
         "error": None,
     }
