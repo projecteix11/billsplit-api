@@ -385,13 +385,13 @@ class TestUpdatePaymentStatus:
 class TestDeleteOrderItem:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
         with patch("app.services.orders.supabase") as mock_sb:
-            # _assert_item_owner: single SELECT with nested order (returns order_id)
-            # _recalculate_order_totals: get_order_by_id (orders table)
             mock_sb.select.side_effect = [
                 [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
-                [],  # get_order_by_id → recalculate skips
+                [],  # item details for stock (empty → skip stock restoration)
+                [],  # get_order_by_id → _recalculate_order_totals skips
             ]
             mock_sb.delete.return_value = None
+            mock_sb.update.return_value = None
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/order-items/item-1", headers=_auth_headers())
 
@@ -424,7 +424,8 @@ class TestUpdateOrderItemQuantity:
         with patch("app.services.orders.supabase") as mock_sb:
             mock_sb.select.side_effect = [
                 [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
-                [],  # get_order_by_id → recalculate skips
+                [],  # item details for stock (empty → skip stock adjustment)
+                [],  # get_order_by_id → _recalculate_order_totals skips
             ]
             mock_sb.update.return_value = None
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
