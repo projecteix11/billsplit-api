@@ -19,6 +19,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
                 "tenant": None,
                 "role": role,
                 "is_platform_user": True,
+                "avatar_url": None,
             },
             "error": None,
         }
@@ -32,6 +33,12 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
     )
     if not tenant_rows:
         return JSONResponse(status_code=404, content={"data": None, "error": "Tenant not found"})
+
+    user_rows = supabase.select(
+        "users",
+        f"select=avatar_url&id=eq.{user_id}&limit=1",
+    )
+    avatar_url = user_rows[0]["avatar_url"] if user_rows else None
 
     tenant = tenant_rows[0]
     return {
@@ -48,6 +55,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
             },
             "role": role,
             "is_platform_user": False,
+            "avatar_url": avatar_url,
         },
         "error": None,
     }
