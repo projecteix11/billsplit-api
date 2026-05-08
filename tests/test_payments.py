@@ -3,17 +3,48 @@ Tests for:
   POST /api/payments               – create payment (rate limited)
   POST /api/payments/redsys-sign   – generate Redsys payment signature (rate limited)
 
-The Redsys signing is pure crypto – we can test it without mocking by using
-known inputs and verifying the output structure.
+Redsys signing is delegated to a Supabase Edge Function.
+All tests mock requests.post or sign_redsys to avoid hitting the real endpoint.
 """
 
-import base64
-import json
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from tests.conftest import make_payment
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_edge_response(amount_cents="5000", order_number="123456789012"):
+    """Build a fake Edge Function JSON response."""
+    import base64, json
+    params = {
+        "DS_MERCHANT_AMOUNT": amount_cents,
+        "DS_MERCHANT_ORDER": order_number,
+        "DS_MERCHANT_MERCHANTCODE": "999008881",
+        "DS_MERCHANT_TERMINAL": "001",
+        "DS_MERCHANT_TRANSACTIONTYPE": "0",
+        "DS_MERCHANT_CURRENCY": "978",
+        "DS_MERCHANT_URLOK": "https://example.com/ok",
+        "DS_MERCHANT_URLKO": "https://example.com/ko",
+    }
+    return {
+        "Ds_MerchantParameters": base64.b64encode(json.dumps(params).encode()).decode(),
+        "Ds_Signature": "dGVzdHNpZ25hdHVyZQ==",
+        "Ds_SignatureVersion": "HMAC_SHA256_V1",
+        "redsysUrl": "https://sis-t.redsys.es:25443/sis/realizarPago",
+        "orderNumber": order_number,
+    }
+
+
+def _mock_requests_post(amount_cents="5000", order_number="123456789012"):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = _make_edge_response(amount_cents, order_number)
+    mock_resp.raise_for_status.return_value = None
+    return mock_resp
 
 
 # ---------------------------------------------------------------------------
@@ -138,11 +169,13 @@ class TestRedsysSign:
     }
 
     def test_redsys_sign_returns_200(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
+        with patch("app.services.payments.requests.post", return_value=_mock_requests_post()):
+            resp = client.post("/payments/redsys-sign", json=self._valid_body)
         assert resp.status_code == 200
 
     def test_redsys_sign_returns_required_fields(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
+        with patch("app.services.payments.requests.post", return_value=_mock_requests_post()):
+            resp = client.post("/payments/redsys-sign", json=self._valid_body)
         body = resp.json()
         assert "Ds_MerchantParameters" in body
         assert "Ds_Signature" in body
@@ -151,50 +184,19 @@ class TestRedsysSign:
         assert "orderNumber" in body
 
     def test_redsys_sign_signature_version_is_hmac_sha256(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
+        with patch("app.services.payments.requests.post", return_value=_mock_requests_post()):
+            resp = client.post("/payments/redsys-sign", json=self._valid_body)
         assert resp.json()["Ds_SignatureVersion"] == "HMAC_SHA256_V1"
 
-    def test_redsys_sign_merchant_params_is_valid_base64(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        params_b64 = resp.json()["Ds_MerchantParameters"]
-        # Should not raise
-        decoded = base64.b64decode(params_b64).decode("utf-8")
-        params = json.loads(decoded)
-        assert "DS_MERCHANT_AMOUNT" in params
-        assert "DS_MERCHANT_ORDER" in params
-        assert "DS_MERCHANT_MERCHANTCODE" in params
-
-    def test_redsys_sign_amount_converted_to_cents(self, client: TestClient):
-        resp = client.post(
-            "/payments/redsys-sign",
-            json={"amount": 12.50, "urlOk": "https://ok", "urlKo": "https://ko"},
-        )
-        params_b64 = resp.json()["Ds_MerchantParameters"]
-        params = json.loads(base64.b64decode(params_b64))
-        assert params["DS_MERCHANT_AMOUNT"] == "1250"
-
-    def test_redsys_sign_includes_url_ok_and_ko(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        params_b64 = resp.json()["Ds_MerchantParameters"]
-        params = json.loads(base64.b64decode(params_b64))
-        assert params["DS_MERCHANT_URLOK"] == "https://example.com/ok"
-        assert params["DS_MERCHANT_URLKO"] == "https://example.com/ko"
-
     def test_redsys_sign_order_number_max_12_chars(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        order_number = resp.json()["orderNumber"]
-        assert len(order_number) <= 12
-
-    def test_redsys_sign_signature_is_non_empty_base64(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        sig = resp.json()["Ds_Signature"]
-        assert len(sig) > 0
-        base64.b64decode(sig)  # Should not raise
+        with patch("app.services.payments.requests.post", return_value=_mock_requests_post()):
+            resp = client.post("/payments/redsys-sign", json=self._valid_body)
+        assert len(resp.json()["orderNumber"]) <= 12
 
     def test_redsys_sign_redsys_url_is_present(self, client: TestClient):
-        resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        url = resp.json()["redsysUrl"]
-        assert "redsys.es" in url
+        with patch("app.services.payments.requests.post", return_value=_mock_requests_post()):
+            resp = client.post("/payments/redsys-sign", json=self._valid_body)
+        assert "redsys.es" in resp.json()["redsysUrl"]
 
     def test_redsys_sign_missing_amount_returns_422(self, client: TestClient):
         resp = client.post(
@@ -218,14 +220,12 @@ class TestRedsysSign:
         assert resp.status_code == 422
 
     def test_redsys_sign_zero_amount_returns_400(self, client: TestClient):
-        """amount=0 is falsy – the router guard should catch it."""
         resp = client.post(
             "/payments/redsys-sign",
             json={"amount": 0, "urlOk": "https://ok", "urlKo": "https://ko"},
         )
         assert resp.status_code == 400
-        body = resp.json()
-        assert body["data"] is None
+        assert resp.json()["data"] is None
 
     def test_redsys_sign_empty_url_ok_returns_400(self, client: TestClient):
         resp = client.post(
@@ -241,15 +241,35 @@ class TestRedsysSign:
         )
         assert resp.status_code == 400
 
+    def test_redsys_sign_returns_500_when_edge_function_fails(self, client: TestClient):
+        from requests.exceptions import HTTPError
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = HTTPError("502")
+        with patch("app.services.payments.requests.post", return_value=mock_resp):
+            resp = client.post("/payments/redsys-sign", json=self._valid_body)
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
+
 
 # ---------------------------------------------------------------------------
-# Pure unit tests for Redsys service functions (no HTTP layer)
+# Pure unit tests for Redsys service (no HTTP layer)
 # ---------------------------------------------------------------------------
 
 class TestRedsysServiceUnit:
+    def test_sign_redsys_calls_edge_function_with_correct_payload(self):
+        from app.services.payments import sign_redsys
+        mock_post = _mock_requests_post()
+        with patch("app.services.payments.requests.post", return_value=mock_post) as m:
+            sign_redsys(50.0, "https://ok", "https://ko")
+        _, kwargs = m.call_args
+        assert kwargs["json"]["amount"] == 50.0
+        assert kwargs["json"]["urlOk"] == "https://ok"
+        assert kwargs["json"]["urlKo"] == "https://ko"
+
     def test_sign_redsys_returns_result_object(self):
         from app.services.payments import sign_redsys
-        result = sign_redsys(50.0, "https://ok", "https://ko")
+        with patch("app.services.payments.requests.post", return_value=_mock_requests_post()):
+            result = sign_redsys(50.0, "https://ok", "https://ko")
         assert result.Ds_SignatureVersion == "HMAC_SHA256_V1"
         assert result.Ds_MerchantParameters
         assert result.Ds_Signature
@@ -257,30 +277,15 @@ class TestRedsysServiceUnit:
 
     def test_sign_redsys_dict_method_returns_all_keys(self):
         from app.services.payments import sign_redsys
-        result = sign_redsys(10.0, "https://ok", "https://ko")
-        d = result.dict()
-        assert set(d.keys()) == {
+        with patch("app.services.payments.requests.post", return_value=_mock_requests_post()):
+            result = sign_redsys(10.0, "https://ok", "https://ko")
+        assert set(result.dict().keys()) == {
             "Ds_MerchantParameters",
             "Ds_Signature",
             "Ds_SignatureVersion",
             "redsysUrl",
             "orderNumber",
         }
-
-    def test_derive_key_returns_bytes(self):
-        from app.services.payments import _derive_key
-        secret = "sq7HjrUOBfKmC576ILgskD900SqIlHkI8awNPoDg"
-        key = _derive_key(secret, "123456789012")
-        assert isinstance(key, bytes)
-        assert len(key) > 0
-
-    def test_sign_redsys_different_amounts_produce_different_params(self):
-        from app.services.payments import sign_redsys
-        r1 = sign_redsys(10.0, "https://ok", "https://ko")
-        r2 = sign_redsys(20.0, "https://ok", "https://ko")
-        p1 = json.loads(base64.b64decode(r1.Ds_MerchantParameters))
-        p2 = json.loads(base64.b64decode(r2.Ds_MerchantParameters))
-        assert p1["DS_MERCHANT_AMOUNT"] != p2["DS_MERCHANT_AMOUNT"]
 
 
 # ---------------------------------------------------------------------------
