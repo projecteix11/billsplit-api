@@ -6,6 +6,7 @@ import unittest.mock as mock
 import pytest
 from fastapi.testclient import TestClient
 from app.middleware.tenant import get_current_tenant
+from tests.conftest import make_mock_client
 
 
 @pytest.fixture
@@ -44,9 +45,10 @@ def test_slug_cache_ttl(monkeypatch):
     from app.middleware import tenant as t
 
     monkeypatch.setattr(t, "_SLUG_CACHE", {})
-    monkeypatch.setattr(t, "_CACHE_TTL", 1.0)  # 1 second for test speed
+    monkeypatch.setattr(t, "_CACHE_TTL", 1.0)
 
-    with mock.patch("app.db.supabase.select", return_value=[{"id": "uuid-abc"}]) as m:
+    mock_q = make_mock_client(data=[{"id": "uuid-abc"}])
+    with mock.patch("app.middleware.tenant.get_client", return_value=mock_q) as m:
         result1 = t._resolve_slug("demo")
         assert result1 == "uuid-abc"
         assert m.call_count == 1
@@ -57,16 +59,18 @@ def test_slug_cache_ttl(monkeypatch):
 
     # Expire cache
     t._SLUG_CACHE["demo"] = (t._SLUG_CACHE["demo"][0], time.monotonic() - 2.0)
-    with mock.patch("app.db.supabase.select", return_value=[{"id": "uuid-abc"}]) as m:
+    mock_q2 = make_mock_client(data=[{"id": "uuid-abc"}])
+    with mock.patch("app.middleware.tenant.get_client", return_value=mock_q2) as m2:
         t._resolve_slug("demo")
-        assert m.call_count == 1  # cache expired → DB hit
+        assert m2.call_count == 1  # cache expired → DB hit
 
 
 def test_slug_cache_caches_misses(monkeypatch):
     from app.middleware import tenant as t
 
     monkeypatch.setattr(t, "_SLUG_CACHE", {})
-    with mock.patch("app.db.supabase.select", return_value=[]) as m:
+    mock_q = make_mock_client(data=[])
+    with mock.patch("app.middleware.tenant.get_client", return_value=mock_q) as m:
         result1 = t._resolve_slug("nonexistent")
         assert result1 is None
         assert m.call_count == 1
@@ -81,27 +85,26 @@ def test_slug_cache_caches_misses(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def mock_tenant_select(monkeypatch):
-    """Patch supabase.select to return a tenant row for slug 'demo'."""
+def mock_tenant_get_client(monkeypatch):
+    """Patch get_client in tenant middleware to return a tenant row for slug 'demo'."""
     from app.middleware import tenant as t
     monkeypatch.setattr(t, "_SLUG_CACHE", {})
 
-    def _select(table, query=""):
-        if table == "tenants" and "demo" in query:
-            return [{"id": "tenant-uuid-demo"}]
-        return []
+    mock_q = make_mock_client(data=[{"id": "tenant-uuid-demo"}])
 
-    with mock.patch("app.db.supabase.select", side_effect=_select):
+    def _make_client():
+        return mock_q
+
+    with mock.patch("app.middleware.tenant.get_client", side_effect=_make_client):
         yield
 
 
-def test_dishes_without_origin_returns_404(real_tenant_client, mock_tenant_select):
-    # No Origin header, no Authorization header → 404
+def test_dishes_without_origin_returns_404(real_tenant_client, mock_tenant_get_client):
     resp = real_tenant_client.get("/dishes", headers={})
     assert resp.status_code == 404
 
 
-def test_dishes_with_tenant_origin_resolves(real_tenant_client, mock_tenant_select):
+def test_dishes_with_tenant_origin_resolves(real_tenant_client, mock_tenant_get_client):
     with mock.patch("app.services.dishes.get_all_dishes", return_value=[]) as m:
         resp = real_tenant_client.get(
             "/dishes",
@@ -111,11 +114,15 @@ def test_dishes_with_tenant_origin_resolves(real_tenant_client, mock_tenant_sele
     m.assert_called_once_with("tenant-uuid-demo")
 
 
-def test_dishes_with_unknown_origin_returns_404(real_tenant_client, mock_tenant_select):
-    resp = real_tenant_client.get(
-        "/dishes",
-        headers={"Origin": "https://unknown.gobbly.app"},
-    )
+def test_dishes_with_unknown_origin_returns_404(real_tenant_client, mock_tenant_get_client):
+    # "unknown" slug — mock returns empty data for a fresh slug cache miss
+    from app.middleware import tenant as t
+    mock_q_empty = make_mock_client(data=[])
+    with mock.patch("app.middleware.tenant.get_client", return_value=mock_q_empty):
+        resp = real_tenant_client.get(
+            "/dishes",
+            headers={"Origin": "https://unknown.gobbly.app"},
+        )
     assert resp.status_code == 404
 
 
@@ -125,6 +132,7 @@ def test_orders_list_with_valid_jwt(real_tenant_client, monkeypatch):
     monkeypatch.setattr(t, "_SLUG_CACHE", {})
 
     with (
+        mock.patch("app.middleware.tenant.verify_token_full", return_value=("user-1", "tenant-uuid-staff", "admin")),
         mock.patch("app.db.supabase.verify_token_full", return_value=("user-1", "tenant-uuid-staff", "admin")),
         mock.patch("app.services.orders.fetch_orders", return_value=[]) as m,
     ):
@@ -140,7 +148,7 @@ def test_invalid_jwt_returns_401(real_tenant_client, monkeypatch):
     from app.middleware import tenant as t
     monkeypatch.setattr(t, "_SLUG_CACHE", {})
 
-    with mock.patch("app.db.supabase.verify_token_full", side_effect=ValueError("bad token")):
+    with mock.patch("app.middleware.tenant.verify_token_full", side_effect=ValueError("bad token")):
         resp = real_tenant_client.get(
             "/dishes",
             headers={"Authorization": "Bearer bad-token"},

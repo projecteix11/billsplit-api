@@ -4,9 +4,9 @@ import json
 import os
 from typing import Any, Generator
 
-import requests as http
+import httpx as http
 
-from app.db import supabase
+from app.db.supabase import get_client
 from app.logging import log_event, LogFactory
 from app.models import NewOrderItem
 from app.services import dishes as dish_svc
@@ -367,7 +367,7 @@ def _resolve_category_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in items:
         dish_id = item.get("dish_id")
         if dish_id:
-            rows = supabase.select("dishes", f"id=eq.{dish_id}&select=category_id")
+            rows = get_client().table("dishes").select("category_id").eq("id", dish_id).execute().data or []
             if rows:
                 item["category_id"] = rows[0].get("category_id")
             else:
@@ -392,20 +392,13 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
     """Route tool name to the appropriate service call."""
 
     if name == "get_tables":
-        rows = supabase.select(
-            "restaurant_tables",
-            "id,number,status,active_order_id&order=number.asc",
-        )
+        rows = get_client().table("restaurant_tables").select("id,number,status,active_order_id").order("number").execute().data or []
         return rows
 
     if name == "open_table":
         table_id = args["table_id"]
         table_number = args["table_number"]
-        supabase.update(
-            "restaurant_tables",
-            f"id=eq.{table_id}",
-            {"status": "on-dine"},
-        )
+        get_client().table("restaurant_tables").update({"status": "on-dine"}).eq("id", table_id).execute()
         return {"_refresh": True, "menu_path": f"/menu/{table_id}?num={table_number}", "message": f"Mesa {table_number} abierta"}
 
     if name == "get_menu":
@@ -419,11 +412,10 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         query = args.get("query", "").strip()
         # Search each word with ilike at DB level — handles hyphens, accents, spacing
         words = query.split()
-        filters = "&".join(f"name=ilike.*{w}*" for w in words)
-        rows = supabase.select(
-            "dishes",
-            f"{filters}&is_available=eq.true&select=id,name,price,category_id",
-        )
+        q = get_client().table("dishes").select("id,name,price,category_id").eq("is_available", True)
+        for w in words:
+            q = q.ilike("name", f"*{w}*")
+        rows = q.execute().data or []
         if not rows:
             return {"matches": [], "count": 0, "message": f"No dishes found matching '{query}'"}
         return {"matches": [{"name": r["name"], "id": r["id"], "price": r["price"], "category_id": r["category_id"]} for r in rows], "count": len(rows)}

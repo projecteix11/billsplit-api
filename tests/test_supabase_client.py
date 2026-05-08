@@ -1,36 +1,16 @@
 """
 Unit tests for app/db/supabase.py
 
-Tests the thin HTTP client wrapper:
+Tests:
 - init() configuration
-- _request() error handling
-- select(), insert(), update() helper methods
-- verify_token()
+- verify_token() and verify_token_full() using the supabase-py client
 
-All actual HTTP calls are intercepted via unittest.mock.
+The old _request/select/insert/update helpers no longer exist — they were
+replaced by the fluent supabase-py client builder.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
-import requests
-
-
-# ---------------------------------------------------------------------------
-# Helpers to get a freshly patched supabase module state
-# ---------------------------------------------------------------------------
-
-def _make_response(status_code: int, json_data=None, text: str = "") -> MagicMock:
-    resp = MagicMock(spec=requests.Response)
-    resp.status_code = status_code
-    resp.text = text if json_data is None else ""
-    resp.content = b"content" if json_data else b""
-    if json_data is not None:
-        resp.json.return_value = json_data
-        resp.text = str(json_data)
-        resp.content = b"content"
-    else:
-        resp.json.side_effect = Exception("no json")
-    return resp
+from unittest.mock import patch, MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -56,9 +36,8 @@ class TestSupabaseInit:
         import app.db.supabase as sb
         monkeypatch.setenv("SUPABASE_URL", "https://myproject.supabase.co")
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "my-service-key")
-        with patch("requests.Session") as MockSession:
-            instance = MagicMock()
-            MockSession.return_value = instance
+        with patch("app.db.supabase.create_client") as mock_create:
+            mock_create.return_value = MagicMock()
             sb.init()
         assert sb._base_url == "https://myproject.supabase.co"
         assert sb._api_key == "my-service-key"
@@ -67,159 +46,25 @@ class TestSupabaseInit:
         import app.db.supabase as sb
         monkeypatch.setenv("SUPABASE_URL", "https://myproject.supabase.co/")
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "key")
-        with patch("requests.Session") as MockSession:
-            MockSession.return_value = MagicMock()
+        with patch("app.db.supabase.create_client") as mock_create:
+            mock_create.return_value = MagicMock()
             sb.init()
         assert not sb._base_url.endswith("/")
 
-
-# ---------------------------------------------------------------------------
-# _request()
-# ---------------------------------------------------------------------------
-
-class TestRequestHelper:
-    def _make_sb(self):
+    def test_init_creates_client_via_create_client(self, monkeypatch):
         import app.db.supabase as sb
-        sb._base_url = "http://test.local"
-        sb._api_key = "test-key"
-        sb._session = MagicMock()
-        return sb
-
-    def test_request_raises_on_4xx_status(self):
-        sb = self._make_sb()
-        resp = _make_response(404, {"message": "not found"})
-        sb._session.request.return_value = resp
-        with pytest.raises(RuntimeError, match="supabase 404"):
-            sb._request("GET", "orders", query="id=eq.x")
-
-    def test_request_raises_on_5xx_status(self):
-        sb = self._make_sb()
-        resp = _make_response(500, {"message": "internal error"})
-        sb._session.request.return_value = resp
-        with pytest.raises(RuntimeError, match="supabase 500"):
-            sb._request("GET", "orders")
-
-    def test_request_raises_uses_text_when_json_fails(self):
-        sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 503
-        resp.text = "Service Unavailable"
-        resp.json.side_effect = Exception("not json")
-        sb._session.request.return_value = resp
-        with pytest.raises(RuntimeError, match="Service Unavailable"):
-            sb._request("GET", "orders")
-
-    def test_request_returns_json_when_result_type_set(self):
-        sb = self._make_sb()
-        data = [{"id": "1", "name": "test"}]
-        resp = _make_response(200, data)
-        sb._session.request.return_value = resp
-        result = sb._request("GET", "orders", result_type=True)
-        assert result == data
-
-    def test_request_returns_none_when_no_result_type(self):
-        sb = self._make_sb()
-        resp = _make_response(200, [{"id": "1"}])
-        sb._session.request.return_value = resp
-        result = sb._request("PATCH", "orders", query="id=eq.1", body={"status": "closed"})
-        assert result is None
-
-    def test_request_returns_none_for_null_body(self):
-        sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.content = b"null"
-        resp.text = "null"
-        resp.json.return_value = None
-        sb._session.request.return_value = resp
-        result = sb._request("GET", "orders", result_type=True)
-        assert result is None
-
-    def test_request_includes_prefer_header_when_set(self):
-        sb = self._make_sb()
-        resp = _make_response(200, [])
-        sb._session.request.return_value = resp
-        sb._request("POST", "orders", prefer="return=representation", result_type=True)
-        call_kwargs = sb._session.request.call_args
-        assert call_kwargs[1]["headers"]["Prefer"] == "return=representation"
-
-    def test_request_constructs_correct_url_with_query(self):
-        sb = self._make_sb()
-        resp = _make_response(200, [])
-        sb._session.request.return_value = resp
-        sb._request("GET", "dishes", query="is_available=eq.true")
-        call_args = sb._session.request.call_args
-        url = call_args[0][1]
-        assert url == "http://test.local/rest/v1/dishes?is_available=eq.true"
+        monkeypatch.setenv("SUPABASE_URL", "https://myproject.supabase.co")
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "my-key")
+        with patch("app.db.supabase.create_client") as mock_create:
+            fake_client = MagicMock()
+            mock_create.return_value = fake_client
+            sb.init()
+        mock_create.assert_called_once_with("https://myproject.supabase.co", "my-key")
+        assert sb._client is fake_client
 
 
 # ---------------------------------------------------------------------------
-# select(), insert(), update()
-# ---------------------------------------------------------------------------
-
-class TestSelectInsertUpdate:
-    def _make_sb(self):
-        import app.db.supabase as sb
-        sb._base_url = "http://test.local"
-        sb._api_key = "test-key"
-        sb._session = MagicMock()
-        return sb
-
-    def test_select_returns_list(self):
-        sb = self._make_sb()
-        data = [{"id": "1"}]
-        resp = _make_response(200, data)
-        sb._session.request.return_value = resp
-        result = sb.select("orders", "status=eq.open")
-        assert result == data
-
-    def test_select_returns_empty_list_on_null_response(self):
-        sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.content = b""
-        resp.text = "null"
-        resp.json.return_value = None
-        sb._session.request.return_value = resp
-        result = sb.select("orders")
-        assert result == []
-
-    def test_insert_with_return_result_uses_prefer_header(self):
-        sb = self._make_sb()
-        data = [{"id": "new-id"}]
-        resp = _make_response(201, data)
-        sb._session.request.return_value = resp
-        sb.insert("orders", {"status": "open"}, return_result=True)
-        call_kwargs = sb._session.request.call_args[1]
-        assert call_kwargs["headers"]["Prefer"] == "return=representation"
-
-    def test_insert_without_return_result_has_no_prefer_header(self):
-        sb = self._make_sb()
-        resp = _make_response(201, None)
-        resp.status_code = 201
-        resp.content = b""
-        resp.text = ""
-        resp.json.side_effect = Exception()
-        sb._session.request.return_value = resp
-        sb.insert("order_items", [{"dish_name": "X"}], return_result=False)
-        call_kwargs = sb._session.request.call_args[1]
-        assert call_kwargs["headers"].get("Prefer", "") == ""
-
-    def test_update_sends_patch_request(self):
-        sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.content = b""
-        resp.text = ""
-        resp.json.side_effect = Exception()
-        sb._session.request.return_value = resp
-        sb.update("orders", "id=eq.1", {"status": "closed"})
-        method = sb._session.request.call_args[0][0]
-        assert method == "PATCH"
-
-
-# ---------------------------------------------------------------------------
-# verify_token()
+# verify_token() and verify_token_full()
 # ---------------------------------------------------------------------------
 
 class TestVerifyToken:
@@ -227,63 +72,86 @@ class TestVerifyToken:
         import app.db.supabase as sb
         sb._base_url = "http://test.local"
         sb._api_key = "test-key"
-        sb._session = MagicMock()
+        sb._client = MagicMock()
         return sb
 
     def test_verify_token_returns_user_id_on_success(self):
         sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"id": "user-uuid-abc", "email": "test@example.com"}
-        sb._session.get.return_value = resp
-        db_resp = MagicMock()
-        db_resp.status_code = 200
-        db_resp.json.return_value = []
-        sb._session.request.return_value = db_resp
+        mock_user = MagicMock()
+        mock_user.id = "user-uuid-abc"
+        sb._client.auth.get_user.return_value.user = mock_user
+
+        # verify_token_full needs a tenant lookup too — give it an empty result
+        sb._client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+
         user_id = sb.verify_token("valid-token")
         assert user_id == "user-uuid-abc"
 
-    def test_verify_token_raises_on_non_200(self):
+    def test_verify_token_raises_on_auth_exception(self):
         sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 401
-        sb._session.get.return_value = resp
+        sb._client.auth.get_user.side_effect = Exception("invalid or expired token")
         with pytest.raises(ValueError, match="invalid or expired token"):
             sb.verify_token("bad-token")
 
-    def test_verify_token_raises_when_no_user_id_in_response(self):
+    def test_verify_token_raises_when_user_is_none(self):
         sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"email": "test@example.com"}  # no "id"
-        sb._session.get.return_value = resp
-        with pytest.raises(ValueError, match="no user id"):
-            sb.verify_token("token-without-id")
+        sb._client.auth.get_user.return_value.user = None
+        with pytest.raises(ValueError):
+            sb.verify_token("token-no-user")
 
-    def test_verify_token_sends_correct_auth_header(self):
+    def test_verify_token_full_developer_returns_empty_tenant(self):
+        """Developer role: tenant_id is always "" (no DB lookup)."""
         sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"id": "user-1"}
-        sb._session.get.return_value = resp
-        db_resp = MagicMock()
-        db_resp.status_code = 200
-        db_resp.json.return_value = []
-        sb._session.request.return_value = db_resp
-        sb.verify_token("my-bearer-token")
-        call_kwargs = sb._session.get.call_args[1]
-        assert call_kwargs["headers"]["Authorization"] == "Bearer my-bearer-token"
+        mock_user = MagicMock()
+        mock_user.id = "dev-uuid"
+        mock_user.user_metadata = {"role": "developer"}
+        mock_user.app_metadata = {}
+        sb._client.auth.get_user.return_value.user = mock_user
 
-    def test_verify_token_calls_auth_endpoint(self):
+        # Clear cache so the token isn't served from cache
+        sb._TOKEN_CACHE.clear()
+
+        user_id, tenant_id, role = sb.verify_token_full("dev-token")
+        assert user_id == "dev-uuid"
+        assert tenant_id == ""
+        assert role == "developer"
+
+    def test_verify_token_full_non_developer_reads_user_roles(self):
+        """Non-developer: tenant_id and role come from user_roles table."""
         sb = self._make_sb()
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"id": "user-1"}
-        sb._session.get.return_value = resp
-        db_resp = MagicMock()
-        db_resp.status_code = 200
-        db_resp.json.return_value = []
-        sb._session.request.return_value = db_resp
-        sb.verify_token("token")
-        url = sb._session.get.call_args[0][0]
-        assert "/auth/v1/user" in url
+        mock_user = MagicMock()
+        mock_user.id = "admin-uuid"
+        mock_user.user_metadata = {}
+        mock_user.app_metadata = {}
+        sb._client.auth.get_user.return_value.user = mock_user
+
+        # Fluent builder for user_roles table
+        mock_q = MagicMock()
+        mock_q.table.return_value = mock_q
+        mock_q.select.return_value = mock_q
+        mock_q.eq.return_value = mock_q
+        mock_q.limit.return_value = mock_q
+        mock_q.execute.return_value.data = [{"tenant_id": "tenant-xyz", "role": "admin"}]
+        sb._client = mock_q
+        # Re-patch auth on the new mock
+        auth_mock = MagicMock()
+        auth_user_mock = MagicMock()
+        auth_user_mock.id = "admin-uuid"
+        auth_user_mock.user_metadata = {}
+        auth_user_mock.app_metadata = {}
+        auth_mock.get_user.return_value.user = auth_user_mock
+        mock_q.auth = auth_mock
+
+        sb._TOKEN_CACHE.clear()
+
+        user_id, tenant_id, role = sb.verify_token_full("admin-token")
+        assert user_id == "admin-uuid"
+        assert tenant_id == "tenant-xyz"
+        assert role == "admin"
+
+    def test_verify_token_full_raises_on_exception(self):
+        sb = self._make_sb()
+        sb._client.auth.get_user.side_effect = Exception("bad token")
+        sb._TOKEN_CACHE.clear()
+        with pytest.raises(ValueError):
+            sb.verify_token_full("bad-token-unique-99")

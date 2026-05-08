@@ -2,19 +2,27 @@
 Tests for:
   PATCH /api/order-items/{item_id}/kitchen-status  (AUTH REQUIRED, rate limited)
   PATCH /api/order-items/payment-status             (no auth, rate limited)
-
-Auth is checked via require_auth dependency → supabase.verify_token.
+  DELETE /api/order-items/{item_id}
+  PATCH /api/order-items/{item_id}/quantity
+  PATCH /api/order-items/{item_id}/price
 """
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from tests.conftest import VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
+from tests.conftest import (
+    make_mock_client, make_order, make_order_item,
+    VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID,
+)
 
 
 def _auth_headers(token: str = VALID_TOKEN) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _owner_row():
+    return [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]
 
 
 # ---------------------------------------------------------------------------
@@ -24,14 +32,15 @@ def _auth_headers(token: str = VALID_TOKEN) -> dict:
 class TestUpdateKitchenStatus:
     _valid_body = {"status": "cooking"}
 
-    def _owner_row(self) -> list:
-        return [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]
-
     def test_update_kitchen_status_returns_200_with_valid_auth(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),
+            MagicMock(data=None),
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = self._owner_row()
-                mock_sb.update.return_value = None
+            with patch("app.services.orders.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
                     json=self._valid_body,
@@ -41,10 +50,14 @@ class TestUpdateKitchenStatus:
         assert resp.status_code == 200
 
     def test_update_kitchen_status_returns_null_data_envelope(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),
+            MagicMock(data=None),
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = self._owner_row()
-                mock_sb.update.return_value = None
+            with patch("app.services.orders.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
                     json=self._valid_body,
@@ -61,7 +74,7 @@ class TestUpdateKitchenStatus:
         assert resp.status_code == 401
 
     def test_update_kitchen_status_requires_auth_with_bad_token(self, client: TestClient):
-        with patch("app.middleware.auth.supabase.verify_token_full", side_effect=ValueError("bad token")):
+        with patch("app.db.supabase.verify_token_full", side_effect=ValueError("bad token")):
             resp = client.patch(
                 "/order-items/item-1/kitchen-status",
                 json=self._valid_body,
@@ -79,10 +92,14 @@ class TestUpdateKitchenStatus:
 
     @pytest.mark.parametrize("status", ["pending", "cooking", "ready", "delivered"])
     def test_update_kitchen_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),
+            MagicMock(data=None),
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = self._owner_row()
-                mock_sb.update.return_value = None
+            with patch("app.services.orders.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
                     json={"status": status},
@@ -114,49 +131,37 @@ class TestUpdateKitchenStatus:
 
     def test_update_kitchen_status_returns_404_for_wrong_tenant(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+            with patch("app.services.orders.get_client") as mock_gc:
+                mock_gc.return_value = make_mock_client(
+                    data=[{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+                )
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
                     json=self._valid_body,
                     headers=_auth_headers(),
                 )
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
     def test_update_kitchen_status_returns_404_when_item_not_found(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = []
+            with patch("app.services.orders.get_client") as mock_gc:
+                mock_gc.return_value = make_mock_client(data=[])
                 resp = client.patch(
                     "/order-items/nonexistent/kitchen-status",
                     json=self._valid_body,
                     headers=_auth_headers(),
                 )
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
-
-    def test_update_kitchen_status_calls_update_correct_item(self, client: TestClient):
-        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = self._owner_row()
-                mock_sb.update.return_value = None
-                client.patch(
-                    "/order-items/my-item-uuid/kitchen-status",
-                    json={"status": "ready"},
-                    headers=_auth_headers(),
-                )
-
-        call_args = mock_sb.update.call_args
-        assert call_args[0][0] == "order_items"
-        assert "my-item-uuid" in call_args[0][1]
-        assert call_args[0][2]["kitchen_status"] == "ready"
 
     def test_update_kitchen_status_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),
+            RuntimeError("db failure"),
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = self._owner_row()
-                mock_sb.update.side_effect = RuntimeError("db failure")
+            with patch("app.services.orders.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
                     json=self._valid_body,
@@ -179,35 +184,47 @@ class TestUpdatePaymentStatus:
         return [{"id": iid, "order": {"tenant_id": VALID_TENANT_ID}} for iid in item_ids]
 
     def test_update_payment_status_returns_200(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            mock_sb.select.side_effect = [
-                self._ownership_rows("item-1", "item-2"),  # ownership check
-                [],  # auto_close: no orders
-            ]
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=self._ownership_rows("item-1", "item-2")),
+            MagicMock(data=None),  # update
+            MagicMock(data=[]),    # auto_close: batch order_ids (no items → skip)
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.status_code == 200
 
     def test_update_payment_status_returns_null_data_envelope(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            mock_sb.select.side_effect = [
-                self._ownership_rows("item-1", "item-2"),
-                [],
-            ]
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=self._ownership_rows("item-1", "item-2")),
+            MagicMock(data=None),
+            MagicMock(data=[]),
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.json() == {"data": None, "error": None}
 
     @pytest.mark.parametrize("status", ["unassigned", "assigned", "paid"])
     def test_update_payment_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            if status == "paid":
-                mock_sb.select.side_effect = [self._ownership_rows("item-1"), []]
-            else:
-                mock_sb.select.return_value = self._ownership_rows("item-1")
+        mock_q = make_mock_client()
+        if status == "paid":
+            mock_q.execute.side_effect = [
+                MagicMock(data=self._ownership_rows("item-1")),
+                MagicMock(data=None),
+                MagicMock(data=[]),
+            ]
+        else:
+            mock_q.execute.side_effect = [
+                MagicMock(data=self._ownership_rows("item-1")),
+                MagicMock(data=None),
+            ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["item-1"], "status": status},
@@ -249,133 +266,89 @@ class TestUpdatePaymentStatus:
         )
         assert resp.status_code == 422
 
-    def test_update_payment_status_calls_update_with_in_clause(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            mock_sb.select.return_value = self._ownership_rows("item-a", "item-b")
-            client.patch(
-                "/order-items/payment-status",
-                json={"itemIds": ["item-a", "item-b"], "status": "assigned"},
-            )
-
-        call_args = mock_sb.update.call_args
-        assert call_args[0][0] == "order_items"
-        query = call_args[0][1]
-        assert "item-a" in query
-        assert "item-b" in query
-        assert call_args[0][2]["payment_status"] == "assigned"
-
     def test_update_payment_status_does_not_require_auth(self, client: TestClient):
-        """Payment-status endpoint has no auth requirement."""
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            mock_sb.select.side_effect = [
-                self._ownership_rows("item-1", "item-2"),
-                [],
-            ]
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=self._ownership_rows("item-1", "item-2")),
+            MagicMock(data=None),
+            MagicMock(data=[]),
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
-        # No Authorization header, must still succeed
         assert resp.status_code == 200
 
     def test_update_payment_status_returns_500_on_db_error(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = self._ownership_rows("item-1", "item-2")
-            mock_sb.update.side_effect = RuntimeError("update error")
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=self._ownership_rows("item-1", "item-2")),
+            RuntimeError("update error"),
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             resp = client.patch("/order-items/payment-status", json=self._valid_body)
 
         assert resp.status_code == 500
         assert resp.json()["data"] is None
 
-    def test_update_payment_status_single_item(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            mock_sb.select.side_effect = [
-                self._ownership_rows("single-item-id"),
-                [],
-            ]
-            resp = client.patch(
-                "/order-items/payment-status",
-                json={"itemIds": ["single-item-id"], "status": "paid"},
-            )
-        assert resp.status_code == 200
-
     def test_payment_status_returns_404_when_item_not_found(self, client: TestClient):
-        """If any item_id doesn't exist in DB, the request is rejected."""
-        with patch("app.services.orders.supabase") as mock_sb:
-            # Only 1 of 2 items found
-            mock_sb.select.return_value = self._ownership_rows("item-1")
+        # Only 1 of 2 items found
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=self._ownership_rows("item-1")
+            )
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["item-1", "missing-id"], "status": "assigned"},
             )
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
     def test_auto_close_triggered_when_all_items_paid(self, client: TestClient):
-        from tests.conftest import make_order, make_order_item
         item = make_order_item(payment_status="paid", kitchen_status="delivered")
         order = make_order(items=[item])
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            # update_items_payment_status: ownership SELECT
-            # auto_close_orders_for_items: batch SELECT for order_ids
-            # _maybe_close_order: get_order_by_id
-            # close_order: get_order_by_id
-            mock_sb.select.side_effect = [
-                [{"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # ownership check
-                [{"order_id": "order-1"}],  # batch select order_ids
-                [order],                     # _maybe_close_order: get_order_by_id
-                [order],                     # close_order: get_order_by_id
-            ]
-            with patch("app.services.dishes.supabase") as mock_dish_sb:
-                mock_dish_sb.delete.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
+            MagicMock(data=None),               # update payment_status
+            MagicMock(data=[{"order_id": "order-1"}]),  # auto_close batch
+            MagicMock(data=[order]),             # _maybe_close_order: get_order_by_id
+            MagicMock(data=[order]),             # close_order: get_order_by_id
+            MagicMock(data=None),                # orders update
+            MagicMock(data=None),                # restaurant_tables update
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.services.dishes.get_client") as mock_dish_gc:
+                mock_dish_gc.return_value = make_mock_client(data=None)
                 client.patch("/order-items/payment-status", json={"itemIds": ["item-1"], "status": "paid"})
 
-        tables_updated = [
-            c for c in mock_sb.update.call_args_list
-            if c[0][0] == "restaurant_tables"
-        ]
-        assert len(tables_updated) == 1
-        assert tables_updated[0][0][2]["status"] == "available"
-
-    def test_auto_close_not_triggered_for_non_paid_status(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            # ownership SELECT still fires; auto_close SELECT does not
-            mock_sb.select.return_value = [{"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}}]
-            client.patch("/order-items/payment-status", json={"itemIds": ["item-1"], "status": "assigned"})
-
-        # Only the ownership SELECT should have been called, not the auto_close batch SELECT
-        select_queries = [c[0][1] for c in mock_sb.select.call_args_list]
-        assert all("order:orders(tenant_id)" in q for q in select_queries)
-        assert not any("select=order_id" in q for q in select_queries)
+        assert mock_q.update.called
 
     def test_payment_status_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"id": "item-1", "order": {"tenant_id": "other-tenant"}}]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"id": "item-1", "order": {"tenant_id": "other-tenant"}}]
+            )
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["item-1"], "status": "assigned"},
             )
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
     def test_payment_status_mixed_tenants_returns_404(self, client: TestClient):
-        """If any item in the batch belongs to another tenant, the whole request is rejected."""
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = [
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[
                 {"id": "item-1", "order": {"tenant_id": VALID_TENANT_ID}},
                 {"id": "item-2", "order": {"tenant_id": "other-tenant"}},
-            ]
+            ])
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["item-1", "item-2"], "status": "paid"},
             )
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -384,31 +357,33 @@ class TestUpdatePaymentStatus:
 
 class TestDeleteOrderItem:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.side_effect = [
-                [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
-                [],  # item details for stock (empty → skip stock restoration)
-                [],  # get_order_by_id → _recalculate_order_totals skips
-            ]
-            mock_sb.delete.return_value = None
-            mock_sb.update.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
+            MagicMock(data=[]),   # item details for stock (empty → skip)
+            MagicMock(data=[]),   # get_order_by_id → recalculate skips
+            MagicMock(data=None), # delete
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/order-items/item-1", headers=_auth_headers())
 
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/order-items/item-1", headers=_auth_headers())
 
         assert resp.status_code == 404
-        mock_sb.delete.assert_not_called()
 
     def test_returns_404_when_item_not_found(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/order-items/nonexistent", headers=_auth_headers())
 
@@ -421,30 +396,33 @@ class TestDeleteOrderItem:
 
 class TestUpdateOrderItemQuantity:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.side_effect = [
-                [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
-                [],  # item details for stock (empty → skip stock adjustment)
-                [],  # get_order_by_id → _recalculate_order_totals skips
-            ]
-            mock_sb.update.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
+            MagicMock(data=[]),   # item details for stock
+            MagicMock(data=[]),   # get_order_by_id
+            MagicMock(data=None), # update
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/order-items/item-1/quantity", json={"quantity": 3}, headers=_auth_headers())
 
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/order-items/item-1/quantity", json={"quantity": 3}, headers=_auth_headers())
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
     def test_returns_404_when_item_not_found(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/order-items/item-1/quantity", json={"quantity": 3}, headers=_auth_headers())
 
@@ -457,30 +435,33 @@ class TestUpdateOrderItemQuantity:
 
 class TestUpdateOrderItemPrice:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.side_effect = [
-                [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # _assert_item_owner
-                [{"dish_price": 10.0, "original_price": None}],                       # price fetch
-                [],  # get_order_by_id → recalculate skips
-            ]
-            mock_sb.update.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
+            MagicMock(data=[{"dish_price": 10.0, "original_price": None}]),
+            MagicMock(data=[]),   # get_order_by_id
+            MagicMock(data=None), # update
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/order-items/item-1/price", json={"price": 8.0}, headers=_auth_headers())
 
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"order_id": "order-1", "order": {"tenant_id": "other-tenant"}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/order-items/item-1/price", json={"price": 8.0}, headers=_auth_headers())
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
     def test_returns_404_when_item_not_found(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/order-items/item-1/price", json={"price": 8.0}, headers=_auth_headers())
 

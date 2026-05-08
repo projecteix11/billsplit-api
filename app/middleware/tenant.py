@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 
 from fastapi import Depends, HTTPException, Request
 
-from app.db import supabase
+from app.db.supabase import get_client, verify_token_full
 
 _SLUG_CACHE: dict[str, tuple[str, float]] = {}
 _FEATURES_CACHE: dict[str, tuple[dict, float]] = {}
@@ -17,7 +17,7 @@ def _resolve_slug(slug: str) -> str | None:
     cached = _SLUG_CACHE.get(slug)
     if cached and time.monotonic() - cached[1] < _CACHE_TTL:
         return cached[0] or None
-    rows = supabase.select("tenants", f"select=id&slug=eq.{slug}&is_active=eq.true&limit=1")
+    rows = get_client().table("tenants").select("id").eq("slug", slug).eq("is_active", True).limit(1).execute().data or []
     tenant_id = rows[0]["id"] if rows else ""
     _SLUG_CACHE[slug] = (tenant_id, time.monotonic())
     return tenant_id or None
@@ -39,7 +39,7 @@ def _get_tenant_features(tenant_id: str) -> dict:
     cached = _FEATURES_CACHE.get(tenant_id)
     if cached and time.monotonic() - cached[1] < _CACHE_TTL:
         return cached[0]
-    rows = supabase.select("tenants", f"select=features&id=eq.{tenant_id}&limit=1")
+    rows = get_client().table("tenants").select("features").eq("id", tenant_id).limit(1).execute().data or []
     features = rows[0]["features"] if rows else {}
     _FEATURES_CACHE[tenant_id] = (features or {}, time.monotonic())
     return features or {}
@@ -73,7 +73,7 @@ async def get_current_tenant(request: Request) -> str:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
-            user_id, tenant_id, role = supabase.verify_token_full(auth_header[7:])
+            user_id, tenant_id, role = verify_token_full(auth_header[7:])
             if tenant_id:
                 request.state.user_id = user_id
                 request.state.tenant_id = tenant_id

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import require_feature
-from app.db import supabase
+from app.db.supabase import get_client
 
 router = APIRouter()
 
@@ -35,7 +35,7 @@ async def create_reservation(
     if not 1 <= body.party_size <= 20:
         return JSONResponse(status_code=422, content={"data": None, "error": "party_size must be between 1 and 20"})
     try:
-        rows = supabase.insert("reservations", {
+        rows = get_client().table("reservations").insert({
             "tenant_id": tenant_id,
             "name": body.name,
             "email": body.email,
@@ -45,7 +45,7 @@ async def create_reservation(
             "party_size": body.party_size,
             "notes": body.notes,
             "status": "pending",
-        })
+        }).execute().data or []
         return JSONResponse(status_code=201, content={"data": rows[0] if rows else None, "error": None})
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -57,7 +57,7 @@ async def list_reservations(
     tenant_id: str = Depends(require_feature("reservations")),
 ):
     try:
-        rows = supabase.select("reservations", f"tenant_id=eq.{tenant_id}&order=date.asc,time.asc")
+        rows = get_client().table("reservations").select("*").eq("tenant_id", tenant_id).order("date").order("time").execute().data or []
         return {"data": rows, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
@@ -75,7 +75,7 @@ async def update_reservation(
     if not patch:
         return JSONResponse(status_code=422, content={"data": None, "error": "No valid fields to update"})
     try:
-        supabase.update("reservations", f"id=eq.{reservation_id}", patch)
+        get_client().table("reservations").update(patch).eq("id", reservation_id).execute()
         return {"data": None, "error": None}
     except Exception as e:
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})

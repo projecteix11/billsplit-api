@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.db import supabase
+from app.db.supabase import get_client
 from app.models import (
     CreateDailyMenuBody,
     CreateDailyMenuItemBody,
@@ -13,13 +13,7 @@ from app.models import (
     UpdateDailyMenuSectionBody,
 )
 
-# ── PostgREST select (1-level deep: menus → sections) ────────────────────
-
-_MENU_SELECT = (
-    "select=*,sections:daily_menu_sections(id,menu_id,name,sort_order,max_choices)"
-    "&order=created_at.desc"
-    "&daily_menu_sections.order=sort_order"
-)
+_MENU_SELECT = "*,sections:daily_menu_sections(id,menu_id,name,sort_order,max_choices)"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -39,10 +33,7 @@ def _hydrate_menus(rows: list[dict]) -> list[DailyMenu]:
     # Batch-fetch all items for these sections
     items_by_section: dict[str, list[DailyMenuItem]] = {}
     if section_ids:
-        all_items = supabase.select(
-            "daily_menu_items",
-            f"select=*&section_id=in.({','.join(section_ids)})&order=sort_order",
-        )
+        all_items = get_client().table("daily_menu_items").select("*").in_("section_id", section_ids).order("sort_order").execute().data or []
         for it in all_items:
             sid = it["section_id"]
             items_by_section.setdefault(sid, []).append(DailyMenuItem(**it))
@@ -65,25 +56,19 @@ def _hydrate_menus(rows: list[dict]) -> list[DailyMenu]:
 
 
 def _assert_menu_owner(menu_id: str, tenant_id: str) -> None:
-    rows = supabase.select("daily_menus", f"select=id&id=eq.{menu_id}&tenant_id=eq.{tenant_id}&limit=1")
+    rows = get_client().table("daily_menus").select("id").eq("id", menu_id).eq("tenant_id", tenant_id).limit(1).execute().data or []
     if not rows:
         raise ValueError(f"daily menu {menu_id} not found")
 
 
 def _assert_section_owner(section_id: str, tenant_id: str) -> None:
-    rows = supabase.select(
-        "daily_menu_sections",
-        f"select=id,menu:daily_menus(tenant_id)&id=eq.{section_id}&limit=1",
-    )
+    rows = get_client().table("daily_menu_sections").select("id,menu:daily_menus(tenant_id)").eq("id", section_id).limit(1).execute().data or []
     if not rows or rows[0].get("menu", {}).get("tenant_id") != tenant_id:
         raise ValueError(f"daily menu section {section_id} not found")
 
 
 def _assert_item_owner_menu(item_id: str, tenant_id: str) -> None:
-    rows = supabase.select(
-        "daily_menu_items",
-        f"select=id,section:daily_menu_sections(menu:daily_menus(tenant_id))&id=eq.{item_id}&limit=1",
-    )
+    rows = get_client().table("daily_menu_items").select("id,section:daily_menu_sections(menu:daily_menus(tenant_id))").eq("id", item_id).limit(1).execute().data or []
     if not rows or rows[0].get("section", {}).get("menu", {}).get("tenant_id") != tenant_id:
         raise ValueError(f"daily menu item {item_id} not found")
 
@@ -93,27 +78,18 @@ def _assert_item_owner_menu(item_id: str, tenant_id: str) -> None:
 
 def get_daily_menus(tenant_id: str) -> list[DailyMenu]:
     """Active menus only (public / client)."""
-    rows = supabase.select(
-        "daily_menus",
-        f"{_MENU_SELECT}&tenant_id=eq.{tenant_id}&is_active=eq.true",
-    )
+    rows = get_client().table("daily_menus").select(_MENU_SELECT).eq("tenant_id", tenant_id).eq("is_active", True).order("created_at", desc=True).execute().data or []
     return _hydrate_menus(rows)
 
 
 def get_all_daily_menus(tenant_id: str) -> list[DailyMenu]:
     """All menus including inactive (management)."""
-    rows = supabase.select(
-        "daily_menus",
-        f"{_MENU_SELECT}&tenant_id=eq.{tenant_id}",
-    )
+    rows = get_client().table("daily_menus").select(_MENU_SELECT).eq("tenant_id", tenant_id).order("created_at", desc=True).execute().data or []
     return _hydrate_menus(rows)
 
 
 def get_daily_menu_by_id(menu_id: str) -> DailyMenu | None:
-    rows = supabase.select(
-        "daily_menus",
-        f"{_MENU_SELECT}&id=eq.{menu_id}&limit=1",
-    )
+    rows = get_client().table("daily_menus").select(_MENU_SELECT).eq("id", menu_id).limit(1).execute().data or []
     menus = _hydrate_menus(rows)
     return menus[0] if menus else None
 
@@ -121,7 +97,7 @@ def get_daily_menu_by_id(menu_id: str) -> DailyMenu | None:
 def create_daily_menu(body: CreateDailyMenuBody, tenant_id: str) -> DailyMenu:
     data = body.model_dump(exclude_none=True)
     data["tenant_id"] = tenant_id
-    inserted = supabase.insert("daily_menus", data, return_result=True)
+    inserted = get_client().table("daily_menus").insert(data).execute().data
     if not inserted:
         raise RuntimeError("failed to create daily menu")
     menu = get_daily_menu_by_id(inserted[0]["id"])
@@ -135,12 +111,12 @@ def update_daily_menu(menu_id: str, body: UpdateDailyMenuBody, tenant_id: str) -
     patch = body.model_dump(exclude_none=True)
     if not patch:
         return
-    supabase.update("daily_menus", f"id=eq.{menu_id}", patch)
+    get_client().table("daily_menus").update(patch).eq("id", menu_id).execute()
 
 
 def delete_daily_menu(menu_id: str, tenant_id: str) -> None:
     _assert_menu_owner(menu_id, tenant_id)
-    supabase.delete("daily_menus", f"id=eq.{menu_id}")
+    get_client().table("daily_menus").delete().eq("id", menu_id).execute()
 
 
 # ── Sections CRUD ─────────────────────────────────────────────────────────
@@ -150,7 +126,7 @@ def create_section(menu_id: str, body: CreateDailyMenuSectionBody, tenant_id: st
     _assert_menu_owner(menu_id, tenant_id)
     data = body.model_dump(exclude_none=True)
     data["menu_id"] = menu_id
-    inserted = supabase.insert("daily_menu_sections", data, return_result=True)
+    inserted = get_client().table("daily_menu_sections").insert(data).execute().data
     if not inserted:
         raise RuntimeError("failed to create section")
     row = inserted[0]
@@ -162,12 +138,12 @@ def update_section(section_id: str, body: UpdateDailyMenuSectionBody, tenant_id:
     patch = body.model_dump(exclude_none=True)
     if not patch:
         return
-    supabase.update("daily_menu_sections", f"id=eq.{section_id}", patch)
+    get_client().table("daily_menu_sections").update(patch).eq("id", section_id).execute()
 
 
 def delete_section(section_id: str, tenant_id: str) -> None:
     _assert_section_owner(section_id, tenant_id)
-    supabase.delete("daily_menu_sections", f"id=eq.{section_id}")
+    get_client().table("daily_menu_sections").delete().eq("id", section_id).execute()
 
 
 # ── Items CRUD ────────────────────────────────────────────────────────────
@@ -177,7 +153,7 @@ def create_item(section_id: str, body: CreateDailyMenuItemBody, tenant_id: str) 
     _assert_section_owner(section_id, tenant_id)
     data = body.model_dump(exclude_none=True)
     data["section_id"] = section_id
-    inserted = supabase.insert("daily_menu_items", data, return_result=True)
+    inserted = get_client().table("daily_menu_items").insert(data).execute().data
     if not inserted:
         raise RuntimeError("failed to create item")
     return DailyMenuItem(**inserted[0])
@@ -188,9 +164,9 @@ def update_item(item_id: str, body: UpdateDailyMenuItemBody, tenant_id: str) -> 
     patch = body.model_dump(exclude_none=True)
     if not patch:
         return
-    supabase.update("daily_menu_items", f"id=eq.{item_id}", patch)
+    get_client().table("daily_menu_items").update(patch).eq("id", item_id).execute()
 
 
 def delete_item(item_id: str, tenant_id: str) -> None:
     _assert_item_owner_menu(item_id, tenant_id)
-    supabase.delete("daily_menu_items", f"id=eq.{item_id}")
+    get_client().table("daily_menu_items").delete().eq("id", item_id).execute()

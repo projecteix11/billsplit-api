@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.db import supabase
+from app.db.supabase import get_client
 from app.middleware.auth import require_auth
 
 router = APIRouter()
@@ -12,10 +12,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
     role = getattr(request.state, "role", None)
     tenant_id = getattr(request.state, "tenant_id", None)
 
-    user_rows = supabase.select(
-        "users",
-        f"select=avatar_url&id=eq.{user_id}&limit=1",
-    )
+    user_rows = get_client().table("users").select("avatar_url").eq("id", user_id).limit(1).execute().data or []
     avatar_url = user_rows[0]["avatar_url"] if user_rows else None
 
     if role == "developer":
@@ -33,9 +30,14 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
     if not tenant_id:
         return JSONResponse(status_code=400, content={"data": None, "error": "No tenant associated with this user"})
 
-    tenant_rows = supabase.select(
-        "tenants",
-        f"select=id,slug,plan,features,is_active,trial_ends_at,max_users,branding&id=eq.{tenant_id}&limit=1",
+    tenant_rows = (
+        get_client()
+        .table("tenants")
+        .select("id,slug,plan,features,is_active,trial_ends_at,max_users,branding")
+        .eq("id", tenant_id)
+        .limit(1)
+        .execute()
+        .data or []
     )
     if not tenant_rows:
         return JSONResponse(status_code=404, content={"data": None, "error": "Tenant not found"})

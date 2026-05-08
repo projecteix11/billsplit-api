@@ -8,7 +8,7 @@ from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import get_current_tenant
 from app.models import CreateOrderBody, AddItemsBody
-from app.db import supabase
+from app.db.supabase import get_client
 from app.services import orders as svc
 
 router = APIRouter()
@@ -86,7 +86,7 @@ def close_order(request: Request, order_id: str, tenant_id: str = Depends(get_cu
 @router.get("/tables/{table_id}")
 def get_table(table_id: str):
     try:
-        rows = supabase.select("restaurant_tables", f"id=eq.{table_id}&select=id,number,status,active_order_id")
+        rows = get_client().table("restaurant_tables").select("id,number,status,active_order_id").eq("id", table_id).execute().data or []
         if not rows:
             return JSONResponse(status_code=404, content={"data": None, "error": "Table not found"})
         return {"data": rows[0], "error": None}

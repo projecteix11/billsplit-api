@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from app.db import supabase
+from app.db.supabase import get_client
 from app.models import (
     Allergen,
     CreateAllergenBody,
@@ -20,7 +20,7 @@ from app.models import (
 # ── PostgREST select with nested joins ─────────────────────────────────────
 
 _DISH_SELECT = (
-    "select=*"
+    "*"
     ",allergens:dish_allergens(allergen:allergens(id,name,icon))"
     ",ingredients:dish_ingredients(id,ingredient_id,present,sort_order"
     ",ingredient:ingredients(id,name,extra_price))"
@@ -31,26 +31,41 @@ _DISH_SELECT = (
 
 
 def get_dishes(tenant_id: str) -> list[DishFull]:
-    rows = supabase.select(
-        "dishes",
-        f"{_DISH_SELECT}&tenant_id=eq.{tenant_id}&is_available=eq.true&order=sort_order,name",
+    rows = (
+        get_client().table("dishes")
+        .select(_DISH_SELECT)
+        .eq("tenant_id", tenant_id)
+        .eq("is_available", True)
+        .order("sort_order")
+        .order("name")
+        .execute()
+        .data or []
     )
     return [_parse_dish_full(row) for row in rows]
 
 
 def get_all_dishes(tenant_id: str) -> list[DishFull]:
     """All dishes including unavailable (for management)."""
-    rows = supabase.select(
-        "dishes",
-        f"{_DISH_SELECT}&tenant_id=eq.{tenant_id}&order=sort_order,name",
+    rows = (
+        get_client().table("dishes")
+        .select(_DISH_SELECT)
+        .eq("tenant_id", tenant_id)
+        .order("sort_order")
+        .order("name")
+        .execute()
+        .data or []
     )
     return [_parse_dish_full(row) for row in rows]
 
 
 def get_dish_by_id(dish_id: str) -> DishFull | None:
-    rows = supabase.select(
-        "dishes",
-        f"{_DISH_SELECT}&id=eq.{dish_id}&limit=1",
+    rows = (
+        get_client().table("dishes")
+        .select(_DISH_SELECT)
+        .eq("id", dish_id)
+        .limit(1)
+        .execute()
+        .data or []
     )
     if not rows:
         return None
@@ -63,7 +78,7 @@ def create_dish(body: CreateDishBody, tenant_id: str) -> DishFull:
     if "image" in data:
         data["img_medium"] = data.pop("image")
     data["tenant_id"] = tenant_id
-    inserted = supabase.insert("dishes", data, return_result=True)
+    inserted = get_client().table("dishes").insert(data).execute().data
     if not inserted:
         raise RuntimeError("failed to create dish")
     dish = get_dish_by_id(inserted[0]["id"])
@@ -73,7 +88,15 @@ def create_dish(body: CreateDishBody, tenant_id: str) -> DishFull:
 
 
 def _assert_dish_owner(dish_id: str, tenant_id: str) -> None:
-    rows = supabase.select("dishes", f"select=id&id=eq.{dish_id}&tenant_id=eq.{tenant_id}&limit=1")
+    rows = (
+        get_client().table("dishes")
+        .select("id")
+        .eq("id", dish_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+        .data or []
+    )
     if not rows:
         raise ValueError(f"dish {dish_id} not found")
 
@@ -86,30 +109,36 @@ def update_dish(dish_id: str, body: UpdateDishBody, tenant_id: str) -> None:
         data["img_medium"] = data.pop("image")
     if not data:
         return
-    supabase.update("dishes", f"id=eq.{dish_id}", data)
+    get_client().table("dishes").update(data).eq("id", dish_id).execute()
 
 
 def delete_dish(dish_id: str, tenant_id: str) -> None:
     _assert_dish_owner(dish_id, tenant_id)
-    supabase.delete("dishes", f"id=eq.{dish_id}")
+    get_client().table("dishes").delete().eq("id", dish_id).execute()
 
 
 # ── Categories ──────────────────────────────────────────────────────────────
 
 
 def get_categories(tenant_id: str) -> list[DishCategory]:
-    rows = supabase.select(
-        "categories",
-        f"select=id,name,sort_order,requires_kitchen&tenant_id=eq.{tenant_id}&is_active=eq.true&order=sort_order",
+    rows = (
+        get_client().table("categories")
+        .select("id,name,sort_order,requires_kitchen")
+        .eq("tenant_id", tenant_id)
+        .eq("is_active", True)
+        .order("sort_order")
+        .execute()
+        .data or []
     )
     return [DishCategory(**row) for row in rows]
 
 
 def create_category(name: str, sort_order: int, tenant_id: str, requires_kitchen: bool = True) -> DishCategory:
-    inserted = supabase.insert(
-        "categories",
-        {"name": name, "sort_order": sort_order, "is_active": True, "tenant_id": tenant_id, "requires_kitchen": requires_kitchen},
-        return_result=True,
+    inserted = (
+        get_client().table("categories")
+        .insert({"name": name, "sort_order": sort_order, "is_active": True, "tenant_id": tenant_id, "requires_kitchen": requires_kitchen})
+        .execute()
+        .data
     )
     if not inserted:
         raise RuntimeError("failed to create category")
@@ -125,18 +154,24 @@ def update_category(category_id: str, name: str | None, sort_order: int | None, 
     if requires_kitchen is not None:
         data["requires_kitchen"] = requires_kitchen
     if data:
-        supabase.update("categories", f"id=eq.{category_id}", data)
+        get_client().table("categories").update(data).eq("id", category_id).execute()
 
 
 def delete_category(category_id: str) -> None:
-    supabase.update("categories", f"id=eq.{category_id}", {"is_active": False})
+    get_client().table("categories").update({"is_active": False}).eq("id", category_id).execute()
 
 
 # ── Allergens ───────────────────────────────────────────────────────────────
 
 
 def get_allergens() -> list[Allergen]:
-    rows = supabase.select("allergens", "select=id,name,icon&order=name")
+    rows = (
+        get_client().table("allergens")
+        .select("id,name,icon")
+        .order("name")
+        .execute()
+        .data or []
+    )
     return [Allergen(**row) for row in rows]
 
 
@@ -147,18 +182,18 @@ def update_allergen(allergen_id: str, name: str | None, icon: str | None) -> Non
     if icon is not None:
         patch["icon"] = icon
     if patch:
-        supabase.update("allergens", f"id=eq.{allergen_id}", patch)
+        get_client().table("allergens").update(patch).eq("id", allergen_id).execute()
 
 
 def delete_allergen(allergen_id: str) -> None:
-    supabase.delete("allergens", f"id=eq.{allergen_id}")
+    get_client().table("allergens").delete().eq("id", allergen_id).execute()
 
 
 def create_allergen(body: CreateAllergenBody) -> Allergen:
     data = body.model_dump(exclude_none=True)
     # Generate slug from name (DB requires it)
     data["slug"] = re.sub(r"[^a-z0-9]+", "-", data["name"].lower()).strip("-")
-    inserted = supabase.insert("allergens", data, return_result=True)
+    inserted = get_client().table("allergens").insert(data).execute().data
     if not inserted:
         raise RuntimeError("failed to create allergen")
     row = inserted[0]
@@ -168,10 +203,10 @@ def create_allergen(body: CreateAllergenBody) -> Allergen:
 def set_dish_allergens(dish_id: str, allergen_ids: list[str], tenant_id: str) -> None:
     """Replace all allergens for a dish."""
     _assert_dish_owner(dish_id, tenant_id)
-    supabase.delete("dish_allergens", f"dish_id=eq.{dish_id}")
+    get_client().table("dish_allergens").delete().eq("dish_id", dish_id).execute()
     if allergen_ids:
         rows = [{"dish_id": dish_id, "allergen_id": aid} for aid in allergen_ids]
-        supabase.insert("dish_allergens", rows, return_result=False)
+        get_client().table("dish_allergens").insert(rows).execute()
 
 
 # ── Dish ingredients ────────────────────────────────────────────────────────
@@ -180,11 +215,13 @@ def set_dish_allergens(dish_id: str, allergen_ids: list[str], tenant_id: str) ->
 
 
 def get_dish_ingredients(dish_id: str) -> list[DishIngredient]:
-    rows = supabase.select(
-        "dish_ingredients",
-        f"select=id,ingredient_id,present,sort_order"
-        f",ingredient:ingredients(id,name,extra_price)"
-        f"&dish_id=eq.{dish_id}&order=sort_order",
+    rows = (
+        get_client().table("dish_ingredients")
+        .select("id,ingredient_id,present,sort_order,ingredient:ingredients(id,name,extra_price)")
+        .eq("dish_id", dish_id)
+        .order("sort_order")
+        .execute()
+        .data or []
     )
     result = []
     for row in rows:
@@ -209,7 +246,7 @@ def create_dish_ingredient(dish_id: str, body: CreateDishIngredientBody, tenant_
         "name": body.name,
         "extra_price": body.extra_price,
     }
-    inserted = supabase.insert("ingredients", ing_data, return_result=True)
+    inserted = get_client().table("ingredients").insert(ing_data).execute().data
     if not inserted:
         raise RuntimeError("failed to create ingredient")
     ingredient_id = inserted[0]["id"]
@@ -221,7 +258,7 @@ def create_dish_ingredient(dish_id: str, body: CreateDishIngredientBody, tenant_
         "present": body.is_default,
         "sort_order": body.sort_order,
     }
-    supabase.insert("dish_ingredients", junction, return_result=False)
+    get_client().table("dish_ingredients").insert(junction).execute()
 
     return DishIngredient(
         id=ingredient_id,
@@ -255,31 +292,28 @@ def update_dish_ingredient(
         junction_updates["sort_order"] = updates["sort_order"]
 
     if ing_updates:
-        supabase.update("ingredients", f"id=eq.{ingredient_id}", ing_updates)
+        get_client().table("ingredients").update(ing_updates).eq("id", ingredient_id).execute()
     if junction_updates:
-        supabase.update(
-            "dish_ingredients",
-            f"dish_id=eq.{dish_id}&ingredient_id=eq.{ingredient_id}",
-            junction_updates,
-        )
+        get_client().table("dish_ingredients").update(junction_updates).eq("dish_id", dish_id).eq("ingredient_id", ingredient_id).execute()
 
 
 def delete_dish_ingredient(dish_id: str, ingredient_id: str, tenant_id: str) -> None:
     """Remove ingredient from dish (junction only)."""
     _assert_dish_owner(dish_id, tenant_id)
-    supabase.delete(
-        "dish_ingredients",
-        f"dish_id=eq.{dish_id}&ingredient_id=eq.{ingredient_id}",
-    )
+    get_client().table("dish_ingredients").delete().eq("dish_id", dish_id).eq("ingredient_id", ingredient_id).execute()
 
 
 # ── Custom dishes ───────────────────────────────────────────────────────────
 
 
 def get_custom_dishes_for_table(table_id: str) -> list[CustomDish]:
-    rows = supabase.select(
-        "custom_dishes",
-        f"table_id=eq.{table_id}&order=created_at.desc",
+    rows = (
+        get_client().table("custom_dishes")
+        .select("*")
+        .eq("table_id", table_id)
+        .order("created_at", desc=True)
+        .execute()
+        .data or []
     )
     return [CustomDish(**row) for row in rows]
 
@@ -287,18 +321,18 @@ def get_custom_dishes_for_table(table_id: str) -> list[CustomDish]:
 def create_custom_dish(body: CreateCustomDishBody, user_id: str) -> CustomDish:
     row = body.model_dump(exclude_none=True)
     row["created_by"] = user_id
-    inserted = supabase.insert("custom_dishes", row, return_result=True)
+    inserted = get_client().table("custom_dishes").insert(row).execute().data
     if not inserted:
         raise RuntimeError("failed to create custom dish")
     return CustomDish(**inserted[0])
 
 
 def delete_custom_dish(custom_dish_id: str) -> None:
-    supabase.delete("custom_dishes", f"id=eq.{custom_dish_id}")
+    get_client().table("custom_dishes").delete().eq("id", custom_dish_id).execute()
 
 
 def delete_custom_dishes_for_table(table_id: str) -> None:
-    supabase.delete("custom_dishes", f"table_id=eq.{table_id}")
+    get_client().table("custom_dishes").delete().eq("table_id", table_id).execute()
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
