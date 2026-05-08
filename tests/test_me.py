@@ -67,7 +67,7 @@ class TestMeEndpoint:
         assert data["avatar_url"] == "https://example.com/avatar.jpg"
         assert data["is_platform_user"] is False
         mock_select.assert_any_call("users", f"select=avatar_url&id=eq.{VALID_USER_ID}&limit=1")
-        mock_select.assert_any_call("tenants", f"select=id,slug,plan,features,is_active,trial_ends_at,max_users&id=eq.{VALID_TENANT_ID}&limit=1")
+        mock_select.assert_any_call("tenants", f"select=id,slug,plan,features,is_active,trial_ends_at,max_users,branding&id=eq.{VALID_TENANT_ID}&limit=1")
 
     def test_non_developer_without_user_row_returns_null(self, client: TestClient):
         tenant = self._mock_tenant()
