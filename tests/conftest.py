@@ -2,8 +2,8 @@
 Shared fixtures and test setup for the BillSplit API test suite.
 
 Strategy:
-- The app talks to Supabase via the `app.db.supabase` module (plain functions).
-- We patch those functions at the service/router level so no real HTTP calls are made.
+- The app talks to Supabase via the `app.db.supabase` module (get_client() fluent builder).
+- We patch get_client() at the service/router level so no real HTTP calls are made.
 - The app's `supabase.init()` call at import time requires env vars; we stub them out
   with monkeypatching before the app is created.
 - Rate-limit state is reset between tests via a fresh limiter storage override.
@@ -13,6 +13,7 @@ import sys
 import os
 import types
 import pytest
+from unittest.mock import MagicMock
 
 # Stub out axiom_py BEFORE any app code is imported so the logging module
 # can be loaded without the real axiom-py package being installed.
@@ -31,6 +32,27 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 from fastapi.testclient import TestClient
 from app.middleware.tenant import get_current_tenant
 import app.middleware.tenant as _tenant_middleware
+
+
+# ---------------------------------------------------------------------------
+# Mock builder for supabase-py fluent client
+# ---------------------------------------------------------------------------
+
+def make_mock_client(data=None):
+    """Mock of supabase Client that supports the fluent builder pattern.
+
+    Every chained method returns the same mock object. .execute() returns a
+    MagicMock with .data set to `data` (default: empty list).
+    """
+    mock_q = MagicMock()
+    for method in [
+        "table", "select", "eq", "neq", "gt", "gte", "lt", "lte",
+        "in_", "ilike", "like", "order", "limit", "not_",
+        "insert", "update", "delete", "upsert", "filter",
+    ]:
+        getattr(mock_q, method).return_value = mock_q
+    mock_q.execute.return_value = MagicMock(data=data if data is not None else [])
+    return mock_q
 
 # ---------------------------------------------------------------------------
 # Factories for common model dicts
@@ -111,28 +133,27 @@ def make_payment(**overrides) -> dict:
 def app():
     """Return the FastAPI application, initialised once per test session.
 
-    supabase.init() is patched to a no-op so no real network calls occur.
-    get_current_tenant is overridden to return VALID_TENANT_ID so existing
-    route tests don't need an Origin header or JWT.
+    supabase.init() and create_client are patched to no-ops so no real network
+    calls occur.  get_current_tenant is overridden to return VALID_TENANT_ID so
+    existing route tests don't need an Origin header or JWT.
     """
     import unittest.mock as mock
-    with mock.patch("app.db.supabase.init"):
-        # We also need a minimal _session so verify_token and _request don't
-        # crash on None.
-        import app.db.supabase as sb
-        sb._session = mock.MagicMock()
-        sb._base_url = "http://test.supabase.local"
-        sb._api_key = "test-service-role-key"
+    with mock.patch("app.db.supabase.create_client", return_value=make_mock_client()):
+        with mock.patch("app.db.supabase.init"):
+            import app.db.supabase as sb
+            sb._client = make_mock_client()
+            sb._base_url = "http://test.supabase.local"
+            sb._api_key = "test-service-role-key"
 
-        # All features enabled in tests — avoids DB calls from _get_tenant_features
-        _tenant_middleware._get_tenant_features = lambda _tid: {
-            "reservations": True, "kitchen": True, "payments": True,
-            "daily_menus": True, "campaigns": True, "qr_codes": True,
-        }
+            # All features enabled in tests — avoids DB calls from _get_tenant_features
+            _tenant_middleware._get_tenant_features = lambda _tid: {
+                "reservations": True, "kitchen": True, "payments": True,
+                "daily_menus": True, "campaigns": True, "qr_codes": True,
+            }
 
-        from main import app as fastapi_app
-        fastapi_app.dependency_overrides[get_current_tenant] = lambda: VALID_TENANT_ID
-        return fastapi_app
+            from main import app as fastapi_app
+            fastapi_app.dependency_overrides[get_current_tenant] = lambda: VALID_TENANT_ID
+            return fastapi_app
 
 
 @pytest.fixture()

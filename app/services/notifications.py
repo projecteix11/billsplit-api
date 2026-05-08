@@ -1,3 +1,5 @@
+import httpx
+
 from app.db import supabase
 
 
@@ -17,8 +19,8 @@ def broadcast_notification(
     if params:
         payload["params"] = params
 
-    resp = supabase._session.post(
-        f"{supabase._base_url}/realtime/v1/api/broadcast",
+    resp = httpx.post(
+        f"{supabase.get_base_url()}/realtime/v1/api/broadcast",
         json={
             "messages": [
                 {
@@ -27,6 +29,10 @@ def broadcast_notification(
                     "payload": payload,
                 }
             ]
+        },
+        headers={
+            "apikey": supabase.get_api_key(),
+            "Authorization": f"Bearer {supabase.get_api_key()}",
         },
         timeout=10,
     )

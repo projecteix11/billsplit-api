@@ -1,9 +1,9 @@
 from __future__ import annotations
 import os
 
-import requests
+import httpx
 
-from app.db import supabase
+from app.db.supabase import get_client
 from app.models import Payment
 
 
@@ -31,7 +31,7 @@ class RedsysSignResult:
 
 
 def sign_redsys(amount: float, url_ok: str, url_ko: str) -> RedsysSignResult:
-    resp = requests.post(
+    resp = httpx.post(
         _edge_function_url(),
         json={"amount": amount, "urlOk": url_ok, "urlKo": url_ko},
         timeout=10,
@@ -50,7 +50,7 @@ def create_payment(order_id: str, amount: float, method: str) -> Payment:
         "status": "confirmed",
     }
 
-    inserted = supabase.insert("payments", row, return_result=True)
+    inserted = get_client().table("payments").insert(row).execute().data
     if not inserted:
         raise RuntimeError("failed to create payment")
     return Payment(**inserted[0])

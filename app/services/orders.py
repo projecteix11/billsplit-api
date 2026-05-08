@@ -1,7 +1,8 @@
 from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timezone
-from app.db import supabase
+from typing import Optional
+from app.db.supabase import get_client
 from app.models import NewOrderItem, Order, OrderItem
 from app.services import dishes as dish_svc
 from app.services import stock as stock_svc
@@ -29,7 +30,7 @@ def _calculate_tax(subtotal: float) -> float:
 
 
 def _get_tenant_table_ids(tenant_id: str) -> list[str]:
-    rows = supabase.select("restaurant_tables", f"select=id&tenant_id=eq.{tenant_id}&is_active=eq.true")
+    rows = get_client().table("restaurant_tables").select("id").eq("tenant_id", tenant_id).eq("is_active", True).execute().data or []
     return [r["id"] for r in rows]
 
 
@@ -37,14 +38,14 @@ def fetch_orders(tenant_id: str, status: str, kitchen_only: bool = False) -> lis
     table_ids = _get_tenant_table_ids(tenant_id)
     if not table_ids:
         return []
-    ids_csv = ",".join(table_ids)
-    query = f"select=*,items:order_items(*)&status=eq.{status}&table_id=in.({ids_csv})"
-    if status == "closed":
-        query += "&order=updated_at.desc&limit=100"
-    else:
-        query += "&order=created_at.asc&limit=1000"
 
-    rows = supabase.select("orders", query)
+    q = get_client().table("orders").select("*, items:order_items(*)").eq("status", status).in_("table_id", table_ids)
+    if status == "closed":
+        q = q.order("updated_at", desc=True).limit(100)
+    else:
+        q = q.order("created_at", desc=False).limit(1000)
+
+    rows = q.execute().data or []
     orders = [Order(**row) for row in rows]
 
     if kitchen_only:
@@ -57,20 +58,14 @@ def fetch_orders(tenant_id: str, status: str, kitchen_only: bool = False) -> lis
 
 
 def get_order_by_id(order_id: str) -> Order | None:
-    query = f"select=*,items:order_items(*)&id=eq.{order_id}&limit=1"
-    rows = supabase.select("orders", query)
+    rows = get_client().table("orders").select("*, items:order_items(*)").eq("id", order_id).limit(1).execute().data or []
     if not rows:
         return None
     return Order(**rows[0])
 
 
 def get_open_order_for_table(table_id: str) -> Order | None:
-    query = (
-        f"select=*,items:order_items(*)"
-        f"&table_id=eq.{table_id}&status=eq.open"
-        f"&order=created_at.desc&limit=1"
-    )
-    rows = supabase.select("orders", query)
+    rows = get_client().table("orders").select("*, items:order_items(*)").eq("table_id", table_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
     if not rows:
         return None
     return Order(**rows[0])
@@ -94,7 +89,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem], te
         "tenant_id": tenant_id,
     }
 
-    inserted = supabase.insert("orders", order_row, return_result=True)
+    inserted = get_client().table("orders").insert(order_row).execute().data
     if not inserted:
         raise RuntimeError("failed to create order")
     order = Order(**inserted[0])
@@ -104,11 +99,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem], te
     # Deduct ingredients from stock
     stock_svc.deduct_stock_for_items(items, tenant_id)
 
-    supabase.update(
-        "restaurant_tables",
-        f"id=eq.{table_id}",
-        {"status": "on-dine", "active_order_id": order.id},
-    )
+    get_client().table("restaurant_tables").update({"status": "on-dine", "active_order_id": order.id}).eq("id", table_id).execute()
 
     order.items = []
     return order
@@ -129,12 +120,12 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
     tax_amount = _calculate_tax(subtotal)
     total = _round2(subtotal + tax_amount)
 
-    supabase.update("orders", f"id=eq.{order_id}", {
+    get_client().table("orders").update({
         "subtotal": subtotal,
         "tax_amount": tax_amount,
         "total": total,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-    })
+    }).eq("id", order_id).execute()
 
 
 def close_order(order_id: str, tenant_id: str | None = None) -> None:
@@ -149,21 +140,17 @@ def close_order(order_id: str, tenant_id: str | None = None) -> None:
     # only safe when this order is still the active one.
     if order.status != "open":
         return
-    supabase.update("orders", f"id=eq.{order_id}", {
+    get_client().table("orders").update({
         "status": "closed",
         "updated_at": datetime.now(timezone.utc).isoformat(),
-    })
-    supabase.update(
-        "restaurant_tables",
-        f"id=eq.{order.table_id}",
-        {"status": "available", "active_order_id": None},
-    )
+    }).eq("id", order_id).execute()
+    get_client().table("restaurant_tables").update({"status": "available", "active_order_id": None}).eq("id", order.table_id).execute()
     dish_svc.delete_custom_dishes_for_table(order.table_id)
 
 
 def update_item_kitchen_status(item_id: str, status: str, tenant_id: str) -> None:
     _assert_item_owner(item_id, tenant_id)
-    supabase.update("order_items", f"id=eq.{item_id}", {"kitchen_status": status})
+    get_client().table("order_items").update({"kitchen_status": status}).eq("id", item_id).execute()
 
 
 def _maybe_close_order(order_id: str) -> None:
@@ -181,7 +168,7 @@ def _maybe_close_order(order_id: str) -> None:
 
 def auto_close_if_complete(item_id: str) -> None:
     """Close the order containing item_id if all its items are paid and delivered."""
-    rows = supabase.select("order_items", f"select=order_id&id=eq.{item_id}&limit=1")
+    rows = get_client().table("order_items").select("order_id").eq("id", item_id).limit(1).execute().data or []
     if not rows:
         return
     _maybe_close_order(rows[0]["order_id"])
@@ -191,8 +178,7 @@ def auto_close_orders_for_items(item_ids: list[str]) -> None:
     """Batch version: one SELECT to resolve order_ids, then check each unique order once."""
     if not item_ids:
         return
-    ids_csv = ",".join(item_ids)
-    rows = supabase.select("order_items", f"select=order_id&id=in.({ids_csv})")
+    rows = get_client().table("order_items").select("order_id").in_("id", item_ids).execute().data or []
     for order_id in {r["order_id"] for r in rows}:
         _maybe_close_order(order_id)
 
@@ -207,20 +193,17 @@ def _recalculate_order_totals(order_id: str) -> None:
     tax_amount = _calculate_tax(subtotal)
     total = _round2(subtotal + tax_amount)
 
-    supabase.update("orders", f"id=eq.{order_id}", {
+    get_client().table("orders").update({
         "subtotal": subtotal,
         "tax_amount": tax_amount,
         "total": total,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-    })
+    }).eq("id", order_id).execute()
 
 
 def _assert_item_owner(item_id: str, tenant_id: str) -> str:
     """Verify item belongs to tenant. Returns order_id."""
-    rows = supabase.select(
-        "order_items",
-        f"select=order_id,order:orders(tenant_id)&id=eq.{item_id}&limit=1",
-    )
+    rows = get_client().table("order_items").select("order_id, order:orders(tenant_id)").eq("id", item_id).limit(1).execute().data or []
     if not rows or rows[0].get("order", {}).get("tenant_id") != tenant_id:
         raise ValueError(f"order item {item_id} not found")
     return rows[0]["order_id"]
@@ -231,7 +214,7 @@ def delete_order_item(item_id: str, tenant_id: str) -> None:
     order_id = _assert_item_owner(item_id, tenant_id)
 
     # Get item details before deleting to restore stock
-    item_rows = supabase.select("order_items", f"select=dish_id,quantity&id=eq.{item_id}&limit=1")
+    item_rows = get_client().table("order_items").select("dish_id, quantity").eq("id", item_id).limit(1).execute().data or []
     if item_rows:
         item = item_rows[0]
         if item.get("dish_id"):
@@ -245,7 +228,7 @@ def delete_order_item(item_id: str, tenant_id: str) -> None:
             # Restore stock by reversing the deduction
             stock_svc.restore_stock_for_items([temp_item], tenant_id)
 
-    supabase.delete("order_items", f"id=eq.{item_id}")
+    get_client().table("order_items").delete().eq("id", item_id).execute()
     _recalculate_order_totals(order_id)
 
 
@@ -254,7 +237,7 @@ def update_order_item_quantity(item_id: str, quantity: int, tenant_id: str) -> N
     order_id = _assert_item_owner(item_id, tenant_id)
 
     # Get old quantity to handle stock adjustment
-    item_rows = supabase.select("order_items", f"select=dish_id,quantity&id=eq.{item_id}&limit=1")
+    item_rows = get_client().table("order_items").select("dish_id, quantity").eq("id", item_id).limit(1).execute().data or []
     if item_rows:
         item = item_rows[0]
         old_qty = float(item.get("quantity", 0))
@@ -276,7 +259,7 @@ def update_order_item_quantity(item_id: str, quantity: int, tenant_id: str) -> N
                 # Quantity decreased - restore stock
                 stock_svc.restore_stock_for_items([temp_item], tenant_id)
 
-    supabase.update("order_items", f"id=eq.{item_id}", {"quantity": quantity})
+    get_client().table("order_items").update({"quantity": quantity}).eq("id", item_id).execute()
     _recalculate_order_totals(order_id)
 
 
@@ -286,7 +269,7 @@ def update_order_item_price(item_id: str, price: float, tenant_id: str, reason: 
     update_data: dict = {"dish_price": price}
 
     # Fetch current item to preserve original price on first override
-    rows = supabase.select("order_items", f"select=dish_price,original_price&id=eq.{item_id}&limit=1")
+    rows = get_client().table("order_items").select("dish_price, original_price").eq("id", item_id).limit(1).execute().data or []
     if not rows:
         raise ValueError(f"order item {item_id} not found")
 
@@ -295,25 +278,20 @@ def update_order_item_price(item_id: str, price: float, tenant_id: str, reason: 
     if reason:
         update_data["price_override_reason"] = reason
 
-    supabase.update("order_items", f"id=eq.{item_id}", update_data)
+    get_client().table("order_items").update(update_data).eq("id", item_id).execute()
     _recalculate_order_totals(order_id)
 
 
 def update_items_payment_status(item_ids: list[str], status: str, tenant_id: str) -> None:
     if not item_ids:
         return
-    ids_csv = ",".join(item_ids)
-    rows = supabase.select(
-        "order_items",
-        f"select=id,order:orders(tenant_id)&id=in.({ids_csv})",
-    )
+    rows = get_client().table("order_items").select("id, order:orders(tenant_id)").in_("id", item_ids).execute().data or []
     if len(rows) != len(item_ids):
         raise ValueError("one or more order items not found")
     for row in rows:
         if row.get("order", {}).get("tenant_id") != tenant_id:
             raise ValueError(f"order item {row['id']} does not belong to this tenant")
-    in_list = "(" + ids_csv + ")"
-    supabase.update("order_items", f"id=in.{in_list}", {"payment_status": status})
+    get_client().table("order_items").update({"payment_status": status}).in_("id", item_ids).execute()
 
 
 def _enrich_customization(cust: dict) -> dict:
@@ -336,8 +314,7 @@ def _enrich_customization(cust: dict) -> dict:
         return cust
 
     # Batch-fetch names
-    ids_csv = ",".join(ids_to_resolve)
-    rows = supabase.select("ingredients", f"id=in.({ids_csv})&select=id,name")
+    rows = get_client().table("ingredients").select("id, name").in_("id", list(ids_to_resolve)).execute().data or []
     name_map = {r["id"]: r["name"] for r in rows}
 
     # Enrich added_ingredients
@@ -360,8 +337,7 @@ def _lookup_requires_kitchen(category_ids: set[str]) -> dict[str, bool]:
     """Batch-fetch requires_kitchen for a set of category IDs."""
     if not category_ids:
         return {}
-    ids_csv = ",".join(category_ids)
-    rows = supabase.select("categories", f"id=in.({ids_csv})&select=id,requires_kitchen")
+    rows = get_client().table("categories").select("id, requires_kitchen").in_("id", list(category_ids)).execute().data or []
     return {row["id"]: row["requires_kitchen"] for row in rows}
 
 
@@ -387,7 +363,7 @@ def _resolve_ingredient_customizations(
     dish_max_extras: dict[str, int | None] = {}
     dish_variable_price: dict[str, bool] = {}
     for did in dish_ids:
-        rows = supabase.select("dishes", f"select=id,price,max_extra_choices,is_variable_price&id=eq.{did}&limit=1")
+        rows = get_client().table("dishes").select("id, price, max_extra_choices, is_variable_price").eq("id", did).limit(1).execute().data or []
         if rows:
             dish_prices[did] = float(rows[0]["price"])
             dish_max_extras[did] = rows[0].get("max_extra_choices")
@@ -425,10 +401,7 @@ def _resolve_ingredient_customizations(
             )
 
         # Fetch dish_ingredients for validation
-        di_rows = supabase.select(
-            "dish_ingredients",
-            f"select=ingredient_id,present&dish_id=eq.{item.dish_id}",
-        )
+        di_rows = get_client().table("dish_ingredients").select("ingredient_id, present").eq("dish_id", item.dish_id).execute().data or []
         dish_ingredient_map: dict[str, bool] = {
             r["ingredient_id"]: r["present"] for r in di_rows
         }
@@ -439,11 +412,7 @@ def _resolve_ingredient_customizations(
 
         if added:
             added_ids = [a["ingredient_id"] for a in added]
-            ids_csv = ",".join(added_ids)
-            ing_rows = supabase.select(
-                "ingredients",
-                f"select=id,extra_price&id=in.({ids_csv})",
-            )
+            ing_rows = get_client().table("ingredients").select("id, extra_price").in_("id", added_ids).execute().data or []
             ing_price_map = {r["id"]: float(r["extra_price"]) for r in ing_rows}
 
             for a in added:
@@ -542,7 +511,7 @@ def _build_and_insert_items(
 
     # Insert with return to get IDs (needed for ingredient rows)
     if ingredient_rows:
-        inserted = supabase.insert("order_items", rows, return_result=True)
+        inserted = get_client().table("order_items").insert(rows).execute().data
         if not inserted:
             raise RuntimeError("failed to insert order items")
 
@@ -558,6 +527,6 @@ def _build_and_insert_items(
                 })
 
         if all_ing_rows:
-            supabase.insert("order_item_ingredients", all_ing_rows, return_result=False)
+            get_client().table("order_item_ingredients").insert(all_ing_rows).execute()
     else:
-        supabase.insert("order_items", rows, return_result=False)
+        get_client().table("order_items").insert(rows).execute()

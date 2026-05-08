@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import requests as http
+import httpx as http
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "openai/gpt-4.1-mini"

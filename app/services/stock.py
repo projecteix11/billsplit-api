@@ -1,6 +1,5 @@
 """Stock/inventory deduction when orders are placed."""
-from urllib.parse import quote
-from app.db import supabase
+from app.db.supabase import get_client
 from app.models import NewOrderItem
 
 
@@ -16,7 +15,6 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
     if not items or not tenant_id:
         return
 
-    # Collect all unique dish IDs with their quantities
     dish_qty_map: dict[str, float] = {}
     for item in items:
         if item.dish_id:
@@ -25,19 +23,14 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
     if not dish_qty_map:
         return
 
-    # For each dish, get its ingredients and deduct them
     for dish_id, order_qty in dish_qty_map.items():
-        # Get all ingredients for this dish (joined with ingredients table to get names)
-        ing_rows = supabase.select(
-            "dish_ingredients",
-            f"select=ingredient_id,ingredient:ingredients(id,name)"
-            f"&dish_id=eq.{quote(dish_id, safe='')}",
-        )
+        ing_rows = get_client().table("dish_ingredients").select(
+            "ingredient_id,ingredient:ingredients(id,name)"
+        ).eq("dish_id", dish_id).execute().data or []
 
         if not ing_rows:
             continue
 
-        # For each ingredient in the dish, deduct from stock
         for ing_row in ing_rows:
             ingredient = ing_row.get("ingredient")
             if not ingredient:
@@ -47,15 +40,9 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             if not ingredient_name:
                 continue
 
-            # Escape values for Supabase query
-            escaped_name = quote(ingredient_name, safe='')
-            escaped_tenant = quote(tenant_id, safe='')
-
-            # Find the stock_item for this ingredient in this tenant by name
-            stock_rows = supabase.select(
-                "stock_items",
-                f"select=id,current_quantity,tenant_id&name=eq.{escaped_name}&tenant_id=eq.{escaped_tenant}&limit=1",
-            )
+            stock_rows = get_client().table("stock_items").select(
+                "id,current_quantity,tenant_id"
+            ).eq("name", ingredient_name).eq("tenant_id", tenant_id).limit(1).execute().data or []
 
             if not stock_rows:
                 continue
@@ -64,24 +51,19 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             current_qty = float(stock_item["current_quantity"])
             new_qty = max(0.0, current_qty - order_qty)
 
-            # Update stock
-            supabase.update(
-                "stock_items",
-                f"id=eq.{quote(stock_item['id'], safe='')}",
+            get_client().table("stock_items").update(
                 {"current_quantity": new_qty}
-            )
+            ).eq("id", stock_item["id"]).execute()
 
-            # Record movement as consumption
-            movement_row = {
+            get_client().table("stock_movements").insert({
                 "stock_item_id": stock_item["id"],
                 "type": "consumo",
                 "quantity": -order_qty,
                 "quantity_before": current_qty,
                 "quantity_after": new_qty,
-                "notes": f"Consumo automático",
+                "notes": "Consumo automático",
                 "tenant_id": tenant_id,
-            }
-            supabase.insert("stock_movements", movement_row, return_result=False)
+            }).execute()
 
 
 def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
@@ -92,7 +74,6 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
     if not items or not tenant_id:
         return
 
-    # Collect all unique dish IDs with their quantities
     dish_qty_map: dict[str, float] = {}
     for item in items:
         if item.dish_id:
@@ -101,19 +82,14 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
     if not dish_qty_map:
         return
 
-    # For each dish, get its ingredients and restore them
     for dish_id, restore_qty in dish_qty_map.items():
-        # Get all ingredients for this dish (joined with ingredients table to get names)
-        ing_rows = supabase.select(
-            "dish_ingredients",
-            f"select=ingredient_id,ingredient:ingredients(id,name)"
-            f"&dish_id=eq.{quote(dish_id, safe='')}",
-        )
+        ing_rows = get_client().table("dish_ingredients").select(
+            "ingredient_id,ingredient:ingredients(id,name)"
+        ).eq("dish_id", dish_id).execute().data or []
 
         if not ing_rows:
             continue
 
-        # For each ingredient in the dish, restore to stock
         for ing_row in ing_rows:
             ingredient = ing_row.get("ingredient")
             if not ingredient:
@@ -123,15 +99,9 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             if not ingredient_name:
                 continue
 
-            # Escape values for Supabase query
-            escaped_name = quote(ingredient_name, safe='')
-            escaped_tenant = quote(tenant_id, safe='')
-
-            # Find the stock_item for this ingredient in this tenant by name
-            stock_rows = supabase.select(
-                "stock_items",
-                f"select=id,current_quantity,tenant_id&name=eq.{escaped_name}&tenant_id=eq.{escaped_tenant}&limit=1",
-            )
+            stock_rows = get_client().table("stock_items").select(
+                "id,current_quantity,tenant_id"
+            ).eq("name", ingredient_name).eq("tenant_id", tenant_id).limit(1).execute().data or []
 
             if not stock_rows:
                 continue
@@ -140,21 +110,16 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             current_qty = float(stock_item["current_quantity"])
             new_qty = current_qty + restore_qty
 
-            # Update stock
-            supabase.update(
-                "stock_items",
-                f"id=eq.{quote(stock_item['id'], safe='')}",
+            get_client().table("stock_items").update(
                 {"current_quantity": new_qty}
-            )
+            ).eq("id", stock_item["id"]).execute()
 
-            # Record movement as devolution/return
-            movement_row = {
+            get_client().table("stock_movements").insert({
                 "stock_item_id": stock_item["id"],
                 "type": "devolucion",
                 "quantity": restore_qty,
                 "quantity_before": current_qty,
                 "quantity_after": new_qty,
-                "notes": f"Devolución automática",
+                "notes": "Devolución automática",
                 "tenant_id": tenant_id,
-            }
-            supabase.insert("stock_movements", movement_row, return_result=False)
+            }).execute()

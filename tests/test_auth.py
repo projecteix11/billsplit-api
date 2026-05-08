@@ -4,14 +4,14 @@ Tests for authentication middleware and the require_auth dependency.
 Coverage:
 - AuthMiddleware routes that should be protected: GET /api/orders, PATCH kitchen-status
 - require_auth dependency (via endpoints that use it)
-- supabase.verify_token behaviour (patched)
+- supabase.verify_token_full behaviour (patched)
 """
 
 import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
-from tests.conftest import VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
+from tests.conftest import make_mock_client, VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
 
 
 def _auth_headers(token: str = VALID_TOKEN) -> dict:
@@ -31,21 +31,21 @@ class TestAuthOnListOrders:
         resp = client.get("/orders", headers={"Authorization": "Basic dXNlcjpwYXNz"})
         assert resp.status_code == 401
 
-    def test_bearer_but_empty_token_returns_401(self, client: TestClient):
-        with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("invalid")):
-            resp = client.get("/orders", headers={"Authorization": "Bearer "})
+    def test_bearer_but_invalid_token_returns_401(self, client: TestClient):
+        with patch("app.db.supabase.verify_token_full", side_effect=ValueError("invalid")):
+            resp = client.get("/orders", headers={"Authorization": "Bearer bad-token"})
         assert resp.status_code == 401
 
     def test_valid_token_passes_through(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders._get_tenant_table_ids", return_value=[]):
-                with patch("app.services.orders.supabase") as mock_sb:
-                    mock_sb.select.return_value = []
+                with patch("app.services.orders.get_client") as mock_gc:
+                    mock_gc.return_value = make_mock_client(data=[])
                     resp = client.get("/orders", headers=_auth_headers())
         assert resp.status_code == 200
 
     def test_invalid_token_returns_401(self, client: TestClient):
-        with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("expired")):
+        with patch("app.db.supabase.verify_token_full", side_effect=ValueError("expired")):
             resp = client.get("/orders", headers=_auth_headers("bad-token"))
         assert resp.status_code == 401
 
@@ -67,7 +67,7 @@ class TestAuthOnKitchenStatus:
         assert resp.status_code == 401
 
     def test_invalid_token_returns_401(self, client: TestClient):
-        with patch("app.middleware.auth.supabase.verify_token", side_effect=ValueError("bad")):
+        with patch("app.db.supabase.verify_token_full", side_effect=ValueError("bad")):
             resp = client.patch(
                 "/order-items/item-1/kitchen-status",
                 json={"status": "ready"},
@@ -76,10 +76,15 @@ class TestAuthOnKitchenStatus:
         assert resp.status_code == 401
 
     def test_valid_token_allows_update(self, client: TestClient):
+        mock_q = make_mock_client()
+        from unittest.mock import MagicMock
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
+            MagicMock(data=None),
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
-            with patch("app.services.orders.supabase") as mock_sb:
-                mock_sb.select.return_value = [{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]
-                mock_sb.update.return_value = None
+            with patch("app.services.orders.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.patch(
                     "/order-items/item-1/kitchen-status",
                     json={"status": "cooking"},
@@ -94,30 +99,33 @@ class TestAuthOnKitchenStatus:
 
 class TestUnprotectedRoutes:
     def test_get_dishes_no_auth_returns_200(self, client: TestClient):
-        with patch("app.services.dishes.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             resp = client.get("/dishes")
         assert resp.status_code == 200
 
     def test_get_categories_no_auth_returns_200(self, client: TestClient):
-        with patch("app.services.dishes.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             resp = client.get("/categories")
         assert resp.status_code == 200
 
     def test_get_order_by_id_no_auth_returns_non_401(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             resp = client.get("/orders/some-order")
         assert resp.status_code != 401
 
     def test_payment_status_no_auth_returns_200(self, client: TestClient):
-        with patch("app.services.orders.supabase") as mock_sb:
-            mock_sb.update.return_value = None
-            mock_sb.select.side_effect = [
-                [{"id": "i-1", "order": {"tenant_id": VALID_TENANT_ID}}],  # ownership
-                [],  # auto_close: no orders
-            ]
+        from unittest.mock import MagicMock
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "i-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
+            MagicMock(data=None),
+            MagicMock(data=[]),
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             resp = client.patch(
                 "/order-items/payment-status",
                 json={"itemIds": ["i-1"], "status": "paid"},
@@ -135,7 +143,7 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
-        request.state.user_id = None  # prevent short-circuit to state cache
+        request.state.user_id = None
         request.headers = {}
         with pytest.raises(AuthError) as exc_info:
             require_auth(request)
@@ -146,7 +154,7 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
-        request.state.user_id = None  # prevent short-circuit to state cache
+        request.state.user_id = None
         request.headers = {"Authorization": "Token abc"}
         with pytest.raises(AuthError) as exc_info:
             require_auth(request)
@@ -157,9 +165,9 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
-        request.state.user_id = None  # prevent short-circuit to state cache
+        request.state.user_id = None
         request.headers = {"Authorization": "Bearer some-token"}
-        with patch("app.middleware.auth.supabase.verify_token_full", side_effect=ValueError("bad")):
+        with patch("app.db.supabase.verify_token_full", side_effect=ValueError("bad")):
             with pytest.raises(AuthError) as exc_info:
                 require_auth(request)
         assert "Invalid or expired" in exc_info.value.message
@@ -169,8 +177,8 @@ class TestRequireAuthDependency:
         from unittest.mock import MagicMock
 
         request = MagicMock()
-        request.state.user_id = None  # prevent short-circuit to state cache
+        request.state.user_id = None
         request.headers = {"Authorization": f"Bearer {VALID_TOKEN}"}
-        with patch("app.middleware.auth.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             user_id = require_auth(request)
         assert user_id == VALID_USER_ID

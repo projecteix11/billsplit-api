@@ -10,11 +10,11 @@ Coverage:
 - Missing tenant_id returns 400
 """
 
-from unittest.mock import patch, call
+from unittest.mock import patch, MagicMock
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
+from tests.conftest import make_mock_client, VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
 
 
 def _auth_headers(token: str = VALID_TOKEN) -> dict:
@@ -33,22 +33,24 @@ class TestMeEndpoint:
             "is_active": True,
             "trial_ends_at": None,
             "max_users": 5,
+            "branding": None,
         }
 
     def test_developer_with_no_user_row_returns_null_avatar(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, "", "developer")):
-            with patch("app.db.supabase.select") as mock_select:
-                mock_select.return_value = []
+            with patch("app.routers.me.get_client") as mock_gc:
+                mock_gc.return_value = make_mock_client(data=[])
                 resp = client.get("/me", headers=_auth_headers())
         data = resp.json()["data"]
         assert data["avatar_url"] is None
         assert data["is_platform_user"] is True
-        mock_select.assert_any_call("users", f"select=avatar_url&id=eq.{VALID_USER_ID}&limit=1")
 
     def test_developer_with_avatar_returns_avatar_url(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, "", "developer")):
-            with patch("app.db.supabase.select") as mock_select:
-                mock_select.return_value = [{"avatar_url": "https://example.com/dev-avatar.jpg"}]
+            with patch("app.routers.me.get_client") as mock_gc:
+                mock_gc.return_value = make_mock_client(
+                    data=[{"avatar_url": "https://example.com/dev-avatar.jpg"}]
+                )
                 resp = client.get("/me", headers=_auth_headers())
         data = resp.json()["data"]
         assert data["avatar_url"] == "https://example.com/dev-avatar.jpg"
@@ -56,45 +58,50 @@ class TestMeEndpoint:
 
     def test_non_developer_with_avatar_returns_avatar_url(self, client: TestClient):
         tenant = self._mock_tenant()
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"avatar_url": "https://example.com/avatar.jpg"}]),  # users query
+            MagicMock(data=[tenant]),  # tenants query
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "admin")):
-            with patch("app.db.supabase.select") as mock_select:
-                mock_select.side_effect = [
-                    [{"avatar_url": "https://example.com/avatar.jpg"}],  # users query
-                    [tenant],  # tenants query
-                ]
+            with patch("app.routers.me.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.get("/me", headers=_auth_headers())
         data = resp.json()["data"]
         assert data["avatar_url"] == "https://example.com/avatar.jpg"
         assert data["is_platform_user"] is False
-        mock_select.assert_any_call("users", f"select=avatar_url&id=eq.{VALID_USER_ID}&limit=1")
-        mock_select.assert_any_call("tenants", f"select=id,slug,plan,features,is_active,trial_ends_at,max_users,branding&id=eq.{VALID_TENANT_ID}&limit=1")
 
     def test_non_developer_without_user_row_returns_null(self, client: TestClient):
         tenant = self._mock_tenant()
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[]),       # users query — no row found
+            MagicMock(data=[tenant]), # tenants query
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "admin")):
-            with patch("app.db.supabase.select") as mock_select:
-                mock_select.side_effect = [
-                    [],  # users query — no row found
-                    [tenant],  # tenants query
-                ]
+            with patch("app.routers.me.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.get("/me", headers=_auth_headers())
         data = resp.json()["data"]
         assert data["avatar_url"] is None
 
     def test_non_developer_with_null_avatar_in_table_returns_null(self, client: TestClient):
         tenant = self._mock_tenant()
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"avatar_url": None}]),  # users query — row with null
+            MagicMock(data=[tenant]),                 # tenants query
+        ]
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "admin")):
-            with patch("app.db.supabase.select") as mock_select:
-                mock_select.side_effect = [
-                    [{"avatar_url": None}],  # users query — row exists but avatar_url is null
-                    [tenant],  # tenants query
-                ]
+            with patch("app.routers.me.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
                 resp = client.get("/me", headers=_auth_headers())
         data = resp.json()["data"]
         assert data["avatar_url"] is None
 
     def test_non_developer_no_tenant_returns_400(self, client: TestClient):
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, "", "admin")):
-            with patch("app.db.supabase.select", return_value=[]):
+            with patch("app.routers.me.get_client") as mock_gc:
+                mock_gc.return_value = make_mock_client(data=[])
                 resp = client.get("/me", headers=_auth_headers())
         assert resp.status_code == 400

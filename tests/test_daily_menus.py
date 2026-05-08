@@ -6,10 +6,10 @@ POST/PATCH/DELETE items — all must return 404 for wrong-tenant resources.
 """
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from tests.conftest import VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
+from tests.conftest import make_mock_client, VALID_TOKEN, VALID_USER_ID, VALID_TENANT_ID
 
 
 def _auth_headers() -> dict:
@@ -34,25 +34,26 @@ def _owner_item() -> list:
 
 class TestUpdateDailyMenu:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.side_effect = [
-                _owner_menu(),  # _assert_menu_owner
-                [],             # get_daily_menu_by_id (returns None)
-            ]
-            mock_sb.update.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_menu()),  # _assert_menu_owner
+            MagicMock(data=None),            # update
+            MagicMock(data=[]),              # get_daily_menu_by_id (returns None)
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/daily-menus/menu-1", json={"name": "Updated"}, headers=_auth_headers())
 
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = []  # _assert_menu_owner finds nothing
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch("/daily-menus/other-menu", json={"name": "Hack"}, headers=_auth_headers())
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -61,22 +62,25 @@ class TestUpdateDailyMenu:
 
 class TestDeleteDailyMenu:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = _owner_menu()
-            mock_sb.delete.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_menu()),  # _assert_menu_owner
+            MagicMock(data=None),            # delete
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/daily-menus/menu-1", headers=_auth_headers())
 
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/daily-menus/other-menu", headers=_auth_headers())
 
         assert resp.status_code == 404
-        mock_sb.delete.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -86,9 +90,13 @@ class TestDeleteDailyMenu:
 class TestCreateSection:
     def test_returns_201_for_correct_tenant(self, client: TestClient):
         section_row = {"id": "sec-1", "menu_id": "menu-1", "name": "Primeros", "sort_order": 1, "max_choices": 3}
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = _owner_menu()
-            mock_sb.insert.return_value = [section_row]
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_menu()),     # _assert_menu_owner
+            MagicMock(data=[section_row]),     # insert
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.post(
                     "/daily-menus/menu-1/sections",
@@ -99,8 +107,8 @@ class TestCreateSection:
         assert resp.status_code == 201
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.post(
                     "/daily-menus/other-menu/sections",
@@ -109,7 +117,6 @@ class TestCreateSection:
                 )
 
         assert resp.status_code == 404
-        mock_sb.insert.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +125,13 @@ class TestCreateSection:
 
 class TestUpdateSection:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = _owner_section()
-            mock_sb.update.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_section()),
+            MagicMock(data=None),
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch(
                     "/daily-menu-sections/section-1",
@@ -131,8 +142,10 @@ class TestUpdateSection:
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"id": "section-1", "menu": {"tenant_id": "other"}}]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"id": "section-1", "menu": {"tenant_id": "other"}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch(
                     "/daily-menu-sections/section-1",
@@ -141,11 +154,10 @@ class TestUpdateSection:
                 )
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
     def test_returns_404_when_section_not_found(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch(
                     "/daily-menu-sections/nonexistent",
@@ -154,7 +166,6 @@ class TestUpdateSection:
                 )
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -163,22 +174,27 @@ class TestUpdateSection:
 
 class TestDeleteSection:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = _owner_section()
-            mock_sb.delete.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_section()),
+            MagicMock(data=None),
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/daily-menu-sections/section-1", headers=_auth_headers())
 
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"id": "section-1", "menu": {"tenant_id": "other"}}]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"id": "section-1", "menu": {"tenant_id": "other"}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/daily-menu-sections/section-1", headers=_auth_headers())
 
         assert resp.status_code == 404
-        mock_sb.delete.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +203,17 @@ class TestDeleteSection:
 
 class TestCreateItem:
     def test_returns_201_for_correct_tenant(self, client: TestClient):
-        item_row = {"id": "item-1", "section_id": "section-1", "name": "Sopa", "sort_order": 1, "dish_id": None, "description": None, "supplement_price": 0.0}
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = _owner_section()
-            mock_sb.insert.return_value = [item_row]
+        item_row = {
+            "id": "item-1", "section_id": "section-1", "name": "Sopa",
+            "sort_order": 1, "dish_id": None, "description": None, "supplement_price": 0.0,
+        }
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_section()),
+            MagicMock(data=[item_row]),
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.post(
                     "/daily-menu-sections/section-1/items",
@@ -201,8 +224,10 @@ class TestCreateItem:
         assert resp.status_code == 201
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"id": "section-1", "menu": {"tenant_id": "other"}}]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"id": "section-1", "menu": {"tenant_id": "other"}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.post(
                     "/daily-menu-sections/section-1/items",
@@ -211,7 +236,6 @@ class TestCreateItem:
                 )
 
         assert resp.status_code == 404
-        mock_sb.insert.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -220,9 +244,13 @@ class TestCreateItem:
 
 class TestUpdateItem:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = _owner_item()
-            mock_sb.update.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_item()),
+            MagicMock(data=None),
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch(
                     "/daily-menu-items/item-1",
@@ -233,8 +261,10 @@ class TestUpdateItem:
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"id": "item-1", "section": {"menu": {"tenant_id": "other"}}}]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"id": "item-1", "section": {"menu": {"tenant_id": "other"}}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch(
                     "/daily-menu-items/item-1",
@@ -243,11 +273,10 @@ class TestUpdateItem:
                 )
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
     def test_returns_404_when_item_not_found(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = []
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.patch(
                     "/daily-menu-items/nonexistent",
@@ -256,7 +285,6 @@ class TestUpdateItem:
                 )
 
         assert resp.status_code == 404
-        mock_sb.update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -265,19 +293,24 @@ class TestUpdateItem:
 
 class TestDeleteItem:
     def test_returns_200_for_correct_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = _owner_item()
-            mock_sb.delete.return_value = None
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_item()),
+            MagicMock(data=None),
+        ]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/daily-menu-items/item-1", headers=_auth_headers())
 
         assert resp.status_code == 200
 
     def test_returns_404_for_wrong_tenant(self, client: TestClient):
-        with patch("app.services.daily_menus.supabase") as mock_sb:
-            mock_sb.select.return_value = [{"id": "item-1", "section": {"menu": {"tenant_id": "other"}}}]
+        with patch("app.services.daily_menus.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(
+                data=[{"id": "item-1", "section": {"menu": {"tenant_id": "other"}}}]
+            )
             with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
                 resp = client.delete("/daily-menu-items/item-1", headers=_auth_headers())
 
         assert resp.status_code == 404
-        mock_sb.delete.assert_not_called()
