@@ -20,7 +20,21 @@ logging_client.init()
 
 from app.middleware.request_logging import RequestLoggingMiddleware
 
-app = FastAPI()
+_tags_metadata = [
+    {"name": "auth",          "description": "Perfil del usuario autenticado y datos de su tenant."},
+    {"name": "orders",        "description": "Gestión de órdenes de mesa e ítems individuales."},
+    {"name": "menu",          "description": "Platos, categorías, alérgenos e ingredientes del menú."},
+    {"name": "daily menus",   "description": "Menús del día con secciones e ítems configurables."},
+    {"name": "payments",      "description": "Pagos y firma Redsys para TPV virtual."},
+    {"name": "reservations",  "description": "Reservas de mesa con estado y notas."},
+    {"name": "staff",         "description": "Alta y baja de usuarios de staff del tenant."},
+    {"name": "tenants",       "description": "Información pública y resolución de tenants por slug."},
+    {"name": "chat",          "description": "Asistente LLM con acceso a mesa, menú y órdenes."},
+    {"name": "ai",            "description": "Generación de descripciones de platos con IA."},
+    {"name": "notifications", "description": "Broadcast de notificaciones en tiempo real vía Supabase Realtime."},
+]
+
+app = FastAPI(openapi_tags=_tags_metadata)
 
 # Request logging (canonical log lines)
 app.add_middleware(RequestLoggingMiddleware)
@@ -40,7 +54,7 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_origin_regex=r"https://([a-z0-9-]+\.)?gobbly\.app",
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Request-Id", "X-Client-Type", "X-Correlation-Id", "X-Tenant-Slug"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-Id", "X-Client-Type", "X-Correlation-Id", "X-Tenant-Slug", "X-Api-Key"],
     expose_headers=["X-Request-Id"],
 )
 
