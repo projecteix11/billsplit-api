@@ -1,15 +1,15 @@
 import httpx
 
-from app.db import supabase
+from app.db.supabase import get_client, get_base_url, get_api_key
 
 
 def broadcast_notification(
+    tenant_id: str,
     title: str,
     description: str | None = None,
     notification_type: str = "system_alert",
     params: dict | None = None,
 ) -> None:
-    """Send a realtime broadcast notification to all connected frontend clients."""
     payload = {
         "type": notification_type,
         "titleKey": title,
@@ -19,8 +19,20 @@ def broadcast_notification(
     if params:
         payload["params"] = params
 
+    row: dict = {
+        "tenant_id": tenant_id,
+        "type": notification_type,
+        "title_key": title,
+    }
+    if description:
+        row["description_key"] = description
+    if params:
+        row["params"] = params
+
+    get_client().table("notifications").insert(row).execute()
+
     resp = httpx.post(
-        f"{supabase.get_base_url()}/realtime/v1/api/broadcast",
+        f"{get_base_url()}/realtime/v1/api/broadcast",
         json={
             "messages": [
                 {
@@ -31,8 +43,8 @@ def broadcast_notification(
             ]
         },
         headers={
-            "apikey": supabase.get_api_key(),
-            "Authorization": f"Bearer {supabase.get_api_key()}",
+            "apikey": get_api_key(),
+            "Authorization": f"Bearer {get_api_key()}",
         },
         timeout=10,
     )
