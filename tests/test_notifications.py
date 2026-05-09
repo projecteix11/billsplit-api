@@ -8,10 +8,15 @@ from fastapi.testclient import TestClient
 from tests.conftest import make_mock_client, VALID_TENANT_ID
 
 INTERNAL_API_KEY = "test-internal-key"
+
 VALID_BODY = {
-    "tenant_id": VALID_TENANT_ID,
     "title": "notifications.order_ready",
     "notification_type": "order_ready",
+}
+
+VALID_HEADERS = {
+    "x-api-key": INTERNAL_API_KEY,
+    "x-tenant-id": VALID_TENANT_ID,
 }
 
 
@@ -34,7 +39,7 @@ class TestBroadcastEndpoint:
                     resp = client.post(
                         "/notifications/broadcast",
                         json=VALID_BODY,
-                        headers={"x-api-key": INTERNAL_API_KEY},
+                        headers=VALID_HEADERS,
                     )
         assert resp.status_code == 200
         assert resp.json() == {"data": {"status": "sent"}}
@@ -44,48 +49,57 @@ class TestBroadcastEndpoint:
             resp = client.post(
                 "/notifications/broadcast",
                 json=VALID_BODY,
-                headers={"x-api-key": "wrong-key"},
+                headers={**VALID_HEADERS, "x-api-key": "wrong-key"},
             )
         assert resp.status_code == 403
 
-    def test_returns_403_without_api_key(self, client: TestClient):
+    def test_returns_422_without_api_key_header(self, client: TestClient):
         with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
-            resp = client.post("/notifications/broadcast", json=VALID_BODY)
-        assert resp.status_code == 422
-
-    def test_returns_422_without_tenant_id(self, client: TestClient):
-        with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
-            body = {k: v for k, v in VALID_BODY.items() if k != "tenant_id"}
             resp = client.post(
                 "/notifications/broadcast",
-                json=body,
+                json=VALID_BODY,
+                headers={"x-tenant-id": VALID_TENANT_ID},
+            )
+        assert resp.status_code == 422
+
+    def test_returns_422_without_tenant_id_header(self, client: TestClient):
+        with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
+            resp = client.post(
+                "/notifications/broadcast",
+                json=VALID_BODY,
                 headers={"x-api-key": INTERNAL_API_KEY},
             )
         assert resp.status_code == 422
 
     def test_returns_422_without_title(self, client: TestClient):
         with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
-            body = {k: v for k, v in VALID_BODY.items() if k != "title"}
             resp = client.post(
                 "/notifications/broadcast",
-                json=body,
-                headers={"x-api-key": INTERNAL_API_KEY},
+                json={"notification_type": "order_ready"},
+                headers=VALID_HEADERS,
             )
         assert resp.status_code == 422
 
+    def test_tenant_id_not_required_in_body(self, client: TestClient):
+        with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
+            with patch("app.services.notifications.get_client", return_value=make_mock_client()):
+                with patch("app.services.notifications.httpx.post", return_value=_mock_broadcast_resp()):
+                    resp = client.post(
+                        "/notifications/broadcast",
+                        json=VALID_BODY,
+                        headers=VALID_HEADERS,
+                    )
+        assert resp.status_code == 200
+
     def test_accepts_optional_description_and_params(self, client: TestClient):
-        body = {
-            **VALID_BODY,
-            "description": "notifications.table_number",
-            "params": {"table": 5},
-        }
+        body = {**VALID_BODY, "description": "notifications.table_number", "params": {"table": 5}}
         with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
             with patch("app.services.notifications.get_client", return_value=make_mock_client()):
                 with patch("app.services.notifications.httpx.post", return_value=_mock_broadcast_resp()):
                     resp = client.post(
                         "/notifications/broadcast",
                         json=body,
-                        headers={"x-api-key": INTERNAL_API_KEY},
+                        headers=VALID_HEADERS,
                     )
         assert resp.status_code == 200
 
@@ -177,11 +191,9 @@ class TestBroadcastNotificationService:
         mock_client = make_mock_client()
         mock_client.execute.side_effect = lambda: call_order.append("insert") or MagicMock(data=[])
 
-        mock_resp = _mock_broadcast_resp()
-
         def fake_post(*args, **kwargs):
             call_order.append("broadcast")
-            return mock_resp
+            return _mock_broadcast_resp()
 
         with patch("app.services.notifications.get_client", return_value=mock_client):
             with patch("app.services.notifications.httpx.post", side_effect=fake_post):
