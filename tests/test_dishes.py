@@ -261,3 +261,239 @@ class TestDishIngredientOwnership:
                 )
 
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /dishes/{dish_id}
+# ---------------------------------------------------------------------------
+
+class TestGetDishById:
+    def test_returns_200_with_dish(self, client: TestClient):
+        dish = make_dish()
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[dish])
+            resp = client.get("/dishes/dish-1")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["id"] == "dish-1"
+        assert body["error"] is None
+
+    def test_returns_404_when_not_found(self, client: TestClient):
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
+            resp = client.get("/dishes/nonexistent")
+
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["data"] is None
+        assert body["error"] == "Dish not found"
+
+    def test_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = RuntimeError("db error")
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            resp = client.get("/dishes/dish-1")
+
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
+
+
+# ---------------------------------------------------------------------------
+# POST /dishes — auth + validation
+# ---------------------------------------------------------------------------
+
+class TestCreateDish:
+    _valid_body = {"name": "Ensalada César", "price": 8.50}
+
+    def test_returns_201_on_success(self, client: TestClient):
+        dish = make_dish()
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+            with patch("app.services.dishes.get_client") as mock_gc:
+                mock_gc.return_value = make_mock_client(data=[dish])
+                resp = client.post("/dishes", json=self._valid_body, headers=_auth_headers())
+
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["error"] is None
+        assert body["data"]["id"] == "dish-1"
+
+    def test_returns_401_without_token(self, client: TestClient):
+        resp = client.post("/dishes", json=self._valid_body)
+        assert resp.status_code == 401
+
+    def test_returns_422_missing_name(self, client: TestClient):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+            resp = client.post("/dishes", json={"price": 8.50}, headers=_auth_headers())
+        assert resp.status_code == 422
+
+    def test_returns_422_missing_price(self, client: TestClient):
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+            resp = client.post("/dishes", json={"name": "X"}, headers=_auth_headers())
+        assert resp.status_code == 422
+
+    def test_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = RuntimeError("insert failed")
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+            with patch("app.services.dishes.get_client") as mock_gc:
+                mock_gc.return_value = mock_q
+                resp = client.post("/dishes", json=self._valid_body, headers=_auth_headers())
+
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
+
+
+# ---------------------------------------------------------------------------
+# PATCH /dishes/{dish_id} — auth + DB errors
+# ---------------------------------------------------------------------------
+
+class TestUpdateDishNegative:
+    def test_returns_401_without_token(self, client: TestClient):
+        resp = client.patch("/dishes/dish-1", json={"name": "Hack"})
+        assert resp.status_code == 401
+
+    def test_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "dish-1"}]),  # _assert_dish_owner
+            RuntimeError("update failed"),
+        ]
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch("/dishes/dish-1", json={"name": "Updated"}, headers=_auth_headers())
+
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
+
+
+# ---------------------------------------------------------------------------
+# DELETE /dishes/{dish_id} — auth + DB errors
+# ---------------------------------------------------------------------------
+
+class TestDeleteDishNegative:
+    def test_returns_401_without_token(self, client: TestClient):
+        resp = client.delete("/dishes/dish-1")
+        assert resp.status_code == 401
+
+    def test_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "dish-1"}]),  # _assert_dish_owner
+            RuntimeError("delete failed"),
+        ]
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.delete("/dishes/dish-1", headers=_auth_headers())
+
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
+
+
+# ---------------------------------------------------------------------------
+# PUT /dishes/{dish_id}/allergens — auth + DB errors
+# ---------------------------------------------------------------------------
+
+class TestSetDishAllergensNegative:
+    def test_returns_401_without_token(self, client: TestClient):
+        resp = client.put("/dishes/dish-1/allergens", json={"allergen_ids": []})
+        assert resp.status_code == 401
+
+    def test_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "dish-1"}]),  # _assert_dish_owner
+            RuntimeError("delete allergens failed"),
+        ]
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.put(
+                    "/dishes/dish-1/allergens",
+                    json={"allergen_ids": ["alg-1"]},
+                    headers=_auth_headers(),
+                )
+
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
+
+
+# ---------------------------------------------------------------------------
+# PATCH/DELETE /dishes/{dish_id}/ingredients — success + auth + DB errors
+# ---------------------------------------------------------------------------
+
+class TestDishIngredientsMutations:
+    def test_update_ingredient_returns_200(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "dish-1"}]),  # _assert_dish_owner
+            MagicMock(data=None),                 # update
+        ]
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch(
+                    "/dishes/dish-1/ingredients/ing-1",
+                    json={"name": "Tomate"},
+                    headers=_auth_headers(),
+                )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"data": None, "error": None}
+
+    def test_update_ingredient_returns_401_without_token(self, client: TestClient):
+        resp = client.patch("/dishes/dish-1/ingredients/ing-1", json={"name": "X"})
+        assert resp.status_code == 401
+
+    def test_update_ingredient_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "dish-1"}]),
+            RuntimeError("update failed"),
+        ]
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.patch(
+                    "/dishes/dish-1/ingredients/ing-1",
+                    json={"name": "X"},
+                    headers=_auth_headers(),
+                )
+
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
+
+    def test_delete_ingredient_returns_200(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "dish-1"}]),
+            MagicMock(data=None),
+        ]
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.delete("/dishes/dish-1/ingredients/ing-1", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        assert resp.json() == {"data": None, "error": None}
+
+    def test_delete_ingredient_returns_401_without_token(self, client: TestClient):
+        resp = client.delete("/dishes/dish-1/ingredients/ing-1")
+        assert resp.status_code == 401
+
+    def test_delete_ingredient_returns_500_on_db_error(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": "dish-1"}]),
+            RuntimeError("delete failed"),
+        ]
+        with patch("app.services.dishes.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "staff")):
+                resp = client.delete("/dishes/dish-1/ingredients/ing-1", headers=_auth_headers())
+
+        assert resp.status_code == 500
+        assert resp.json()["data"] is None
