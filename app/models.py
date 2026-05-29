@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import Optional
-from pydantic import BaseModel
+from typing import Any, Optional
+from pydantic import BaseModel, Field
 
 
 # ── Dishes ──────────────────────────────────────────────────────────────────
@@ -284,6 +284,52 @@ class CreatePaymentBody(BaseModel):
     orderId: str
     amount: float
     method: str
+
+
+class ActivityEvent(BaseModel):
+    id: str
+    tenant_id: str
+    occurred_at: str
+    actor_type: str
+    actor_id: Optional[str] = None
+    actor_name: Optional[str] = None
+    source: str
+    action: str
+    category: str
+    title: str
+    description: str
+    table_id: Optional[str] = None
+    table_number: Optional[int] = None
+    order_id: Optional[str] = None
+    order_item_id: Optional[str] = None
+    dish_id: Optional[str] = None
+    dish_name: Optional[str] = None
+    quantity: Optional[int] = None
+    amount: Optional[float] = None
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class CreateActivityEventBody(BaseModel):
+    occurred_at: Optional[str] = None
+    actor_type: Optional[str] = None
+    actor_name: Optional[str] = None
+    source: str = "management"
+    action: str
+    category: str
+    title: str
+    description: str
+    table_id: Optional[str] = None
+    table_number: Optional[int] = None
+    order_id: Optional[str] = None
+    order_item_id: Optional[str] = None
+    dish_id: Optional[str] = None
+    dish_name: Optional[str] = None
+    quantity: Optional[int] = None
+    amount: Optional[float] = None
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateQuantityBody(BaseModel):

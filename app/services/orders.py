@@ -99,7 +99,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem], te
     # Deduct ingredients from stock
     stock_svc.deduct_stock_for_items(items, tenant_id)
 
-    get_client().table("restaurant_tables").update({"status": "on-dine", "active_order_id": order.id}).eq("id", table_id).execute()
+    get_client().table("restaurant_tables").update({"status": "in_kitchen", "active_order_id": order.id}).eq("id", table_id).execute()
 
     order.items = []
     return order
@@ -115,6 +115,8 @@ def add_items_to_order(order_id: str, items: list[NewOrderItem]) -> None:
     # Deduct ingredients from stock
     if existing.tenant_id:
         stock_svc.deduct_stock_for_items(items, existing.tenant_id)
+    if existing.table_id:
+        get_client().table("restaurant_tables").update({"status": "in_kitchen"}).eq("id", existing.table_id).execute()
 
     subtotal = _calculate_subtotal_from_items(existing.items)
     tax_amount = _calculate_tax(subtotal)
@@ -149,8 +151,31 @@ def close_order(order_id: str, tenant_id: str | None = None) -> None:
 
 
 def update_item_kitchen_status(item_id: str, status: str, tenant_id: str) -> None:
-    _assert_item_owner(item_id, tenant_id)
+    order_id = _assert_item_owner(item_id, tenant_id)
     get_client().table("order_items").update({"kitchen_status": status}).eq("id", item_id).execute()
+    _sync_table_status_from_order(order_id)
+
+
+def _sync_table_status_from_order(order_id: str) -> None:
+    order = get_order_by_id(order_id)
+    if not order or order.status != "open":
+        return
+
+    kitchen_items = [
+        item for item in order.items
+        if item.kitchen_status is not None and item.kitchen_status != "cancelled"
+    ]
+    if not kitchen_items:
+        return
+
+    if any(item.kitchen_status in {"pending", "cooking", "ready"} for item in kitchen_items):
+        next_status = "in_kitchen"
+    elif all(item.kitchen_status == "delivered" for item in kitchen_items):
+        next_status = "served"
+    else:
+        return
+
+    get_client().table("restaurant_tables").update({"status": next_status}).eq("id", order.table_id).execute()
 
 
 def _maybe_close_order(order_id: str) -> None:

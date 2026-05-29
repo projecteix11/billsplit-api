@@ -7,6 +7,8 @@ from app.middleware.rate_limit import limiter
 from app.middleware.tenant import require_feature
 from app.models import CreatePaymentBody, RedsysSignBody
 from app.logging import log_event, LogFactory
+from app.services import activity as activity_svc
+from app.services import orders as order_svc
 from app.services import payments as svc
 
 router = APIRouter()
@@ -25,6 +27,15 @@ def create_payment(request: Request, body: CreatePaymentBody, _tenant_id: str = 
         log_event(LogFactory.payment_event(
             "payment_created", body.orderId, body.amount, body.method,
         ))
+        order = order_svc.get_order_by_id(body.orderId)
+        activity_svc.record_payment_created(
+            request=request,
+            tenant_id=_tenant_id,
+            order=order.model_dump() if order else None,
+            order_id=body.orderId,
+            amount=body.amount,
+            method=body.method,
+        )
         return JSONResponse(status_code=201, content={"data": payment.model_dump(), "error": None})
     except Exception as e:
         log_event(LogFactory.payment_event(

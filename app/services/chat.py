@@ -16,8 +16,35 @@ from app.services import orders as order_svc
 # -- LLM config ---------------------------------------------------------------
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "openai/gpt-4.1-mini"
-MODEL2 = "anthropic/claude-haiku-4.5"
+DEFAULT_MODEL   = os.getenv("LLM_MODEL", "google/gemma-4-31b-it:free")
+
+AVAILABLE_MODELS: list[dict[str, Any]] = [
+    {"id": "google/gemma-4-31b-it:free",                              "name": "Gemma 4 31B",                "free": True, "tool_calling": "stable"},
+    {"id": "google/gemma-4-26b-a4b-it:free",                         "name": "Gemma 4 26B A4B",            "free": True, "tool_calling": "stable"},
+    {"id": "meta-llama/llama-3.3-70b-instruct:free",                  "name": "Llama 3.3 70B",              "free": True, "tool_calling": "stable"},
+    {"id": "meta-llama/llama-3.2-3b-instruct:free",                   "name": "Llama 3.2 3B",               "free": True, "tool_calling": "experimental"},
+    {"id": "deepseek/deepseek-v4-flash:free",                         "name": "DeepSeek V4 Flash",          "free": True, "tool_calling": "stable"},
+    {"id": "openai/gpt-oss-120b:free",                                "name": "OpenAI OSS 120B",            "free": True, "tool_calling": "stable"},
+    {"id": "openai/gpt-oss-20b:free",                                 "name": "OpenAI OSS 20B",             "free": True, "tool_calling": "stable"},
+    {"id": "nvidia/nemotron-3-super-120b-a12b:free",                  "name": "NVIDIA Nemotron 3 Super 120B","free": True, "tool_calling": "stable"},
+    {"id": "nvidia/nemotron-3-nano-30b-a3b:free",                     "name": "NVIDIA Nemotron Nano 30B",   "free": True, "tool_calling": "stable"},
+    {"id": "nvidia/nemotron-nano-12b-v2-vl:free",                     "name": "NVIDIA Nemotron Nano 12B",   "free": True, "tool_calling": "stable"},
+    {"id": "nvidia/nemotron-nano-9b-v2:free",                         "name": "NVIDIA Nemotron Nano 9B",    "free": True, "tool_calling": "stable"},
+    {"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",      "name": "NVIDIA Nemotron Omni 30B",   "free": True, "tool_calling": "experimental"},
+    {"id": "qwen/qwen3-next-80b-a3b-instruct:free",                   "name": "Qwen3 Next 80B",             "free": True, "tool_calling": "stable"},
+    {"id": "qwen/qwen3-coder:free",                                   "name": "Qwen3 Coder 480B",           "free": True, "tool_calling": "stable"},
+    {"id": "minimax/minimax-m2.5:free",                               "name": "MiniMax M2.5",               "free": True, "tool_calling": "stable"},
+    {"id": "nousresearch/hermes-3-llama-3.1-405b:free",               "name": "Hermes 3 Llama 405B",        "free": True, "tool_calling": "stable"},
+    {"id": "arcee-ai/trinity-large-thinking:free",                    "name": "Arcee Trinity Large",        "free": True, "tool_calling": "experimental"},
+    {"id": "poolside/laguna-m.1:free",                                "name": "Poolside Laguna M.1",        "free": True, "tool_calling": "stable"},
+    {"id": "poolside/laguna-xs.2:free",                               "name": "Poolside Laguna XS.2",       "free": True, "tool_calling": "stable"},
+    {"id": "z-ai/glm-4.5-air:free",                                   "name": "GLM 4.5 Air",                "free": True, "tool_calling": "stable"},
+    {"id": "inclusionai/ring-2.6-1t:free",                            "name": "Ring 2.6 1T",                "free": True, "tool_calling": "experimental"},
+    {"id": "baidu/cobuddy:free",                                      "name": "Baidu CoBuddy",              "free": True, "tool_calling": "experimental"},
+    {"id": "liquid/lfm-2.5-1.2b-instruct:free",                      "name": "LFM2.5 1.2B Instruct",       "free": True, "tool_calling": "experimental"},
+    {"id": "liquid/lfm-2.5-1.2b-thinking:free",                      "name": "LFM2.5 1.2B Thinking",       "free": True, "tool_calling": "experimental"},
+    {"id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", "name": "Dolphin Mistral 24B", "free": True, "tool_calling": "experimental"},
+]
 
 
 def _api_key() -> str:
@@ -27,9 +54,13 @@ def _api_key() -> str:
     return key
 
 
-def _llm_request(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _llm_request(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
     """Send a chat completion request to OpenRouter and return the JSON response."""
-    body: dict[str, Any] = {"model": MODEL, "messages": messages}
+    body: dict[str, Any] = {"model": model or DEFAULT_MODEL, "messages": messages}
     if tools:
         body["tools"] = tools
 
@@ -398,7 +429,7 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
     if name == "open_table":
         table_id = args["table_id"]
         table_number = args["table_number"]
-        get_client().table("restaurant_tables").update({"status": "on-dine"}).eq("id", table_id).execute()
+        get_client().table("restaurant_tables").update({"status": "waiting_order"}).eq("id", table_id).execute()
         return {"_refresh": True, "menu_path": f"/menu/{table_id}?num={table_number}", "message": f"Mesa {table_number} abierta"}
 
     if name == "get_menu":
@@ -480,16 +511,42 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
 MAX_TOOL_ROUNDS = 5
 
 
+WEB_FEATURES_PROMPT = """
+Informació sobre l'aplicació Gobbly (pots explicar-la als usuaris si ho pregunten):
+- MENÚ: gestió de plats per categories, amb preus, al·lèrgens i ingredients extra. Es pot activar/desactivar plats.
+- COMANDES: des de la pàgina de comandes es veuen les comandes actives per mesa, amb l'estat de cada plat (pendent, cuinant, llest, servit).
+- MESES: gestió de l'estat de les meses (lliure, ocupada). Es pot obrir una mesa i generar un QR perquè els clients facin la seva pròpia comanda.
+- PAGAMENTS: des de la comanda es pot cobrar amb targeta (TPV), efectiu o altres mètodes configurats.
+- STOCK: control d'inventari dels ingredients.
+- PLANTILLA: menús del dia configurables per seccions i plats.
+- CONFIGURACIÓ: idioma, aparença (tema clar/fosc), mòduls, impressores, personal i assistent IA.
+- MARKETPLACE: portal per demanar productes als proveïdors directament des de l'app.
+Quan l'usuari pregunti com funciona qualsevol d'aquestes seccions, explica-la de manera clara i concisa.
+"""
+
+KITCHEN_EXTRA_PROMPT = """
+Mode cuina activat: pots ajudar el personal de cuina a consultar i actualitzar l'estat dels plats.
+Quan et demanin actualitzar l'estat d'un plat, usa update_kitchen_status amb els valors: pending, cooking, ready, delivered.
+"""
+
+
 def stream_chat(
     message: str,
     conversation_history: list[dict[str, str]],
     table_id: str | None = None,
     order_id: str | None = None,
+    model: str | None = None,
+    features_kitchen: bool = False,
+    features_web: bool = False,
 ) -> Generator[str, None, None]:
     """Orchestrate the LLM chat with tool calling, yielding SSE events."""
 
     # Build messages
     system_content = SYSTEM_PROMPT
+    if features_kitchen:
+        system_content += KITCHEN_EXTRA_PROMPT
+    if features_web:
+        system_content += WEB_FEATURES_PROMPT
     if table_id:
         system_content += f"\n\nContexto: el usuario esta en la mesa con ID {table_id}."
     if order_id:
@@ -505,7 +562,7 @@ def stream_chat(
     # Tool-calling loop
     for _round in range(MAX_TOOL_ROUNDS):
         try:
-            data = _llm_request(messages, tools=TOOLS)
+            data = _llm_request(messages, tools=TOOLS, model=model)
         except Exception as e:
             yield _sse("error", {"message": f"LLM error: {str(e)}"})
             yield _sse("done", {})
@@ -561,7 +618,7 @@ def stream_chat(
 
     # Exhausted tool rounds — ask LLM for a final answer without tools
     try:
-        data = _llm_request(messages)
+        data = _llm_request(messages, model=model)
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         if content:
             yield _sse("message", {"content": content})
