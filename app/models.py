@@ -233,6 +233,7 @@ class Order(BaseModel):
     id: str
     table_id: str
     table_number: int
+    table_label: Optional[str] = None
     status: str
     subtotal: float
     tax_amount: float
