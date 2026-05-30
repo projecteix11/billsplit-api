@@ -29,15 +29,32 @@ def _calculate_tax(subtotal: float) -> float:
     return _round2(subtotal * TAX_RATE_ES / 100)
 
 
+def _get_tenant_tables(tenant_id: str) -> list[dict]:
+    return get_client().table("restaurant_tables").select("id, number, label").eq("tenant_id", tenant_id).eq("is_active", True).execute().data or []
+
+
 def _get_tenant_table_ids(tenant_id: str) -> list[str]:
-    rows = get_client().table("restaurant_tables").select("id").eq("tenant_id", tenant_id).eq("is_active", True).execute().data or []
-    return [r["id"] for r in rows]
+    return [r["id"] for r in _get_tenant_tables(tenant_id)]
+
+
+def _attach_table_label(row: dict) -> dict:
+    table_id = row.get("table_id")
+    if not table_id:
+        return row
+    tables = get_client().table("restaurant_tables").select("label, number").eq("id", table_id).limit(1).execute().data or []
+    if tables:
+        label = tables[0].get("label")
+        if label:
+            row["table_label"] = label
+    return row
 
 
 def fetch_orders(tenant_id: str, status: str, kitchen_only: bool = False) -> list[Order]:
-    table_ids = _get_tenant_table_ids(tenant_id)
+    tables = _get_tenant_tables(tenant_id)
+    table_ids = [r["id"] for r in tables]
     if not table_ids:
         return []
+    table_labels = {r["id"]: r.get("label") for r in tables if r.get("label")}
 
     q = get_client().table("orders").select("*, items:order_items(*)").eq("status", status).in_("table_id", table_ids)
     if status == "closed":
@@ -46,6 +63,10 @@ def fetch_orders(tenant_id: str, status: str, kitchen_only: bool = False) -> lis
         q = q.order("created_at", desc=False).limit(1000)
 
     rows = q.execute().data or []
+    for row in rows:
+        label = table_labels.get(row.get("table_id"))
+        if label:
+            row["table_label"] = label
     orders = [Order(**row) for row in rows]
 
     if kitchen_only:
@@ -61,14 +82,14 @@ def get_order_by_id(order_id: str) -> Order | None:
     rows = get_client().table("orders").select("*, items:order_items(*)").eq("id", order_id).limit(1).execute().data or []
     if not rows:
         return None
-    return Order(**rows[0])
+    return Order(**_attach_table_label(rows[0]))
 
 
 def get_open_order_for_table(table_id: str) -> Order | None:
     rows = get_client().table("orders").select("*, items:order_items(*)").eq("table_id", table_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
     if not rows:
         return None
-    return Order(**rows[0])
+    return Order(**_attach_table_label(rows[0]))
 
 
 def create_order(table_id: str, table_number: int, items: list[NewOrderItem], tenant_id: str = "") -> Order:
@@ -92,7 +113,7 @@ def create_order(table_id: str, table_number: int, items: list[NewOrderItem], te
     inserted = get_client().table("orders").insert(order_row).execute().data
     if not inserted:
         raise RuntimeError("failed to create order")
-    order = Order(**inserted[0])
+    order = Order(**_attach_table_label(inserted[0]))
 
     _build_and_insert_items(order.id, items, precomputed=precomputed)
 
