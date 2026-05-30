@@ -25,6 +25,16 @@ class PaymentStatusBody(BaseModel):
     status: str
 
 
+class PaymentPortionAllocation(BaseModel):
+    itemId: str
+    splitPortions: int = 1
+    portions: int = 1
+
+
+class PaymentPortionsBody(BaseModel):
+    allocations: list[PaymentPortionAllocation]
+
+
 @router.patch("/order-items/{item_id}/kitchen-status")
 @limiter.limit("20/minute")
 def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(require_feature("kitchen"))):
@@ -92,6 +102,63 @@ def update_payment_status(request: Request, body: PaymentStatusBody, tenant_id: 
                 quantity=len(body.itemIds),
                 tags=["payments", "items", actor_type, *( [f"table-{table_number}"] if table_number is not None else [] )],
                 metadata={"item_ids": body.itemIds},
+            )
+        return {"data": None, "error": None}
+    except ValueError:
+        return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+
+
+@router.patch("/order-items/payment-portions")
+@limiter.limit("20/minute")
+def update_payment_portions(request: Request, body: PaymentPortionsBody, tenant_id: str = Depends(require_feature("payments"))):
+    if not body.allocations:
+        return JSONResponse(status_code=400, content={"data": None, "error": "allocations[] is required"})
+    for allocation in body.allocations:
+        if allocation.splitPortions < 1 or allocation.portions < 1:
+            return JSONResponse(status_code=400, content={"data": None, "error": "splitPortions and portions must be >= 1"})
+
+    try:
+        item_ids = [allocation.itemId for allocation in body.allocations]
+        items_ctx = activity_svc.get_order_items_context(item_ids)
+        updated_ids = svc.update_items_payment_portions(
+            [
+                {
+                    "item_id": allocation.itemId,
+                    "split_portions": allocation.splitPortions,
+                    "portions": allocation.portions,
+                }
+                for allocation in body.allocations
+            ],
+            tenant_id,
+        )
+        if updated_ids:
+            svc.auto_close_orders_for_items(updated_ids)
+        log_event(LogFactory.order_lifecycle(
+            "payment_portions_changed", "",
+            metadata={"allocations": [allocation.model_dump() for allocation in body.allocations]},
+        ))
+        if updated_ids and items_ctx:
+            first_order = (items_ctx[0].get("order") or {})
+            actor_type, actor_id, actor_name = activity_svc.actor_from_request(request)
+            table_number = first_order.get("table_number")
+            activity_svc.record_event(
+                tenant_id=tenant_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_name=actor_name,
+                source="management" if actor_type != "customer" else "client",
+                action="item_portions_paid",
+                category="payments",
+                title="Porciones de articulos pagadas",
+                description=f"{actor_name or 'Sistema'} ha pagado porciones de {len(updated_ids)} articulo(s) en la mesa {table_number}.",
+                table_id=first_order.get("table_id"),
+                table_number=table_number,
+                order_id=first_order.get("id"),
+                quantity=len(updated_ids),
+                tags=["payments", "split", actor_type, *( [f"table-{table_number}"] if table_number is not None else [] )],
+                metadata={"allocations": [allocation.model_dump() for allocation in body.allocations]},
             )
         return {"data": None, "error": None}
     except ValueError:
