@@ -222,6 +222,8 @@ class OrderItem(BaseModel):
     diner_name: str
     kitchen_status: Optional[str] = None
     payment_status: str
+    split_portions: int = 1
+    paid_portions: int = 0
     dish_id: Optional[str] = None
     customization: Optional[dict] = None
     category_id: Optional[str] = None

@@ -340,6 +340,52 @@ def update_items_payment_status(item_ids: list[str], status: str, tenant_id: str
     get_client().table("order_items").update({"payment_status": status}).in_("id", item_ids).execute()
 
 
+def update_items_payment_portions(allocations: list[dict], tenant_id: str) -> list[str]:
+    """Mark paid portions for split-bill items without closing the whole item too early."""
+    if not allocations:
+        return []
+
+    item_ids = [a["item_id"] for a in allocations]
+    rows = (
+        get_client()
+        .table("order_items")
+        .select("id,payment_status,split_portions,paid_portions,order:orders(tenant_id)")
+        .in_("id", item_ids)
+        .execute()
+        .data
+        or []
+    )
+    if len(rows) != len(set(item_ids)):
+        raise ValueError("one or more order items not found")
+
+    row_by_id = {row["id"]: row for row in rows}
+    updated_ids: list[str] = []
+    for allocation in allocations:
+        item_id = allocation["item_id"]
+        row = row_by_id[item_id]
+        if row.get("order", {}).get("tenant_id") != tenant_id:
+            raise ValueError(f"order item {item_id} does not belong to this tenant")
+
+        current_split = max(1, int(row.get("split_portions") or 1))
+        current_paid = current_split if row.get("payment_status") == "paid" else int(row.get("paid_portions") or 0)
+        requested_split = max(current_split, int(allocation.get("split_portions") or 1))
+        portions = max(1, int(allocation.get("portions") or 1))
+        remaining = max(0, requested_split - current_paid)
+        if remaining == 0:
+            continue
+
+        new_paid = min(requested_split, current_paid + min(portions, remaining))
+        new_status = "paid" if new_paid >= requested_split else "unassigned"
+        get_client().table("order_items").update({
+            "split_portions": requested_split,
+            "paid_portions": new_paid,
+            "payment_status": new_status,
+        }).eq("id", item_id).execute()
+        updated_ids.append(item_id)
+
+    return updated_ids
+
+
 def _enrich_customization(cust: dict) -> dict:
     """Resolve ingredient UUIDs to names in customization for display."""
     if not cust:
