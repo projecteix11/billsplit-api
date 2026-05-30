@@ -33,7 +33,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
     tenant_rows = (
         get_client()
         .table("tenants")
-        .select("id,slug,plan,features,is_active,trial_ends_at,max_users,branding")
+        .select("id,slug,plan,features,is_active,trial_ends_at,max_users,branding,surcharges")
         .eq("id", tenant_id)
         .limit(1)
         .execute()
@@ -52,6 +52,7 @@ def get_me(request: Request, user_id: str = Depends(require_auth)):
                 "slug": tenant["slug"],
                 "plan": tenant["plan"],
                 "features": tenant["features"],
+                "surcharges": tenant.get("surcharges") or {},
                 "is_active": tenant["is_active"],
                 "trial_ends_at": tenant["trial_ends_at"],
                 "max_users": tenant["max_users"],
