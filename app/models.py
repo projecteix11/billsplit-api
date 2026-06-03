@@ -229,6 +229,7 @@ class OrderItem(BaseModel):
     category_id: Optional[str] = None
     original_price: Optional[float] = None
     price_override_reason: Optional[str] = None
+    source: str = "management"
 
 
 class Order(BaseModel):
@@ -257,6 +258,7 @@ class NewOrderItem(BaseModel):
     category_id: Optional[str] = None
     original_price: Optional[float] = None
     price_override_reason: Optional[str] = None
+    source: Optional[str] = None
 
 
 class Payment(BaseModel):
