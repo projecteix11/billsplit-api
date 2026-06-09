@@ -29,6 +29,27 @@ def _api_key() -> str:
     return key
 
 
+def _parse_retry_after(resp: http.Response) -> float:
+    """Parse retry-after or try again duration from headers or error message."""
+    sleep_time = 2.5
+    retry_after = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return float(retry_after) + 0.5
+        except ValueError:
+            pass
+    try:
+        err_data = resp.json()
+        err_msg = err_data.get("error", {}).get("message", "")
+        import re
+        match = re.search(r"try again in (\d+(?:\.\d+)?)s", err_msg)
+        if match:
+            return float(match.group(1)) + 0.5
+    except Exception:
+        pass
+    return sleep_time
+
+
 def generate(dish_name: str, language: str = "es") -> str:
     lang_name = LANGUAGE_NAMES.get(language, "español")
     system = SYSTEM_PROMPT.format(language=lang_name)
@@ -66,7 +87,7 @@ def generate(dish_name: str, language: str = "es") -> str:
                 if e.response.status_code in (429, 502, 503, 504):
                     if attempt < 2:
                         import time
-                        time.sleep(2.5)
+                        time.sleep(_parse_retry_after(e.response))
                         continue
                     if fallback_key:
                         break
@@ -91,7 +112,7 @@ def generate(dish_name: str, language: str = "es") -> str:
                 if e.response.status_code in (429, 502, 503, 504):
                     if attempt < 2:
                         import time
-                        time.sleep(2.5)
+                        time.sleep(_parse_retry_after(e.response))
                         continue
                 raise e
     else:
@@ -119,6 +140,6 @@ def generate(dish_name: str, language: str = "es") -> str:
                 if e.response.status_code in (429, 502, 503, 504):
                     if attempt < 2:
                         import time
-                        time.sleep(2.5)
+                        time.sleep(_parse_retry_after(e.response))
                         continue
                 raise e
