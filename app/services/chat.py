@@ -16,13 +16,13 @@ from app.services import orders as order_svc
 # -- LLM config ---------------------------------------------------------------
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-DEFAULT_MODEL   = os.getenv("LLM_MODEL", "gemini-3.5-flash")
+DEFAULT_MODEL   = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 
 AVAILABLE_MODELS: list[dict[str, Any]] = [
-    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash (Recomendado)", "free": True, "tool_calling": "stable"},
-    {"id": "gemini-3.1-pro",   "name": "Gemini 3.1 Pro",                 "free": False, "tool_calling": "stable"},
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash",               "free": True, "tool_calling": "stable"},
+    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash (Recomendado)", "free": True, "tool_calling": "stable"},
     {"id": "gemini-2.5-pro",   "name": "Gemini 2.5 Pro",                 "free": False, "tool_calling": "stable"},
+    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash (Alta demanda)",  "free": True, "tool_calling": "stable"},
+    {"id": "gemini-3.1-pro",   "name": "Gemini 3.1 Pro",                 "free": False, "tool_calling": "stable"},
     {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash",               "free": True, "tool_calling": "stable"},
     {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash",               "free": True, "tool_calling": "stable"},
 ]

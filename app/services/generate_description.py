@@ -4,7 +4,7 @@ import os
 import httpx as http
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-MODEL = os.getenv("LLM_MODEL", "gemini-3.5-flash")
+MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 
 LANGUAGE_NAMES = {"es": "español", "en": "English", "ca": "català"}
 
