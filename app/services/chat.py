@@ -84,6 +84,8 @@ SYSTEM_PROMPT = (
     "- Consultar el menu, platos, categorias y alergenos\n"
     "- Gestionar pedidos (crear, anadir items, modificar, consultar estado)\n"
     "- Informacion sobre mesas disponibles y ocupadas\n"
+    "- Consultar niveles de stock/inventario de ingredientes o articulos\n"
+    "- Obtener resumenes de facturacion y cierre de caja del dia\n"
     "\n"
     "PROCESO OBLIGATORIO PARA CADA PLATO (seguir en orden estricto):\n"
     "1. search_menu(query) → buscar coincidencias\n"
@@ -387,6 +389,31 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_stock",
+            "description": "Check the current stock/inventory quantity for one or all items in the restaurant.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Filter by item name (optional, case-insensitive partial match). If omitted, returns all stock items."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_billing_summary",
+            "description": "Get today's total billing summary (cash closure / tancament de caixa) grouped by payment method.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    }
 ]
 
 
@@ -503,6 +530,50 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         order_svc.update_item_kitchen_status(args["item_id"], args["status"])
         return {"message": f"Kitchen status updated to {args['status']}"}
 
+    if name == "check_stock":
+        query = args.get("query", "").strip()
+        q = get_client().table("stock_items").select("name,current_quantity,min_quantity,unit").eq("is_active", True)
+        if query:
+            q = q.ilike("name", f"*{query}*")
+        rows = q.execute().data or []
+        return [
+            {
+                "name": r["name"],
+                "current_quantity": float(r["current_quantity"]),
+                "min_quantity": float(r["min_quantity"]),
+                "unit": r["unit"],
+                "status": "low_stock" if float(r["current_quantity"]) <= float(r["min_quantity"]) else "ok"
+            }
+            for r in rows
+        ]
+
+    if name == "get_billing_summary":
+        from datetime import date
+        today_iso = date.today().isoformat()
+        
+        # Query orders created today
+        orders_today = get_client().table("orders").select("total,status,amount_paid").gte("created_at", f"{today_iso}T00:00:00").execute().data or []
+        
+        # Query payments created today
+        payments_today = get_client().table("payments").select("amount,payment_method,status").gte("created_at", f"{today_iso}T00:00:00").eq("status", "completed").execute().data or []
+        
+        total_sales = sum(float(o["total"]) for o in orders_today)
+        total_paid = sum(float(o["amount_paid"]) for o in orders_today)
+        
+        by_method = {}
+        for p in payments_today:
+            method = p["payment_method"]
+            amt = float(p["amount"])
+            by_method[method] = by_method.get(method, 0.0) + amt
+            
+        return {
+            "date": today_iso,
+            "total_sales_created": total_sales,
+            "total_paid": total_paid,
+            "payments_by_method": by_method,
+            "orders_count": len(orders_today)
+        }
+
     return {"error": f"Unknown tool: {name}"}
 
 
@@ -538,6 +609,7 @@ def stream_chat(
     model: str | None = None,
     features_kitchen: bool = False,
     features_web: bool = False,
+    device_context: dict[str, Any] | None = None,
 ) -> Generator[str, None, None]:
     """Orchestrate the LLM chat with tool calling, yielding SSE events."""
 
@@ -547,6 +619,14 @@ def stream_chat(
         system_content += KITCHEN_EXTRA_PROMPT
     if features_web:
         system_content += WEB_FEATURES_PROMPT
+    if device_context:
+        printer_name = device_context.get("printer_name")
+        printer_online = device_context.get("printer_online")
+        if printer_name:
+            status_str = "CONECTADA" if printer_online else "DESCONECTADA"
+            system_content += f"\n\n[Contexto Dispositivo]: La impresora térmica vinculada es '{printer_name}' (Estado: {status_str}). Si el usuario tiene problemas para imprimir, indícale este estado y que compruebe la conexión en Configuración > Impresoras."
+        else:
+            system_content += f"\n\n[Contexto Dispositivo]: No hay ninguna impresora vinculada actualmente en el panel."
     if table_id:
         system_content += f"\n\nContexto: el usuario esta en la mesa con ID {table_id}."
     if order_id:

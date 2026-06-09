@@ -19,6 +19,11 @@ class ConversationMessage(BaseModel):
     content: str
 
 
+class DeviceContext(BaseModel):
+    printer_name: str | None = None
+    printer_online: bool | None = None
+
+
 class ChatRequest(BaseModel):
     message: str
     table_id: str | None = None
@@ -27,6 +32,7 @@ class ChatRequest(BaseModel):
     features_kitchen: bool = False
     features_web: bool = False
     conversation_history: list[ConversationMessage] = []
+    device_context: DeviceContext | None = None
 
 
 @router.get("/chat/models")
@@ -71,6 +77,7 @@ def chat(
             model=model,
             features_kitchen=body.features_kitchen,
             features_web=body.features_web,
+            device_context=body.device_context.model_dump() if body.device_context else None,
         ),
         media_type="text/event-stream",
         headers={
