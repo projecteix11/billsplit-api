@@ -72,7 +72,7 @@ def _llm_request(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Send a chat completion request to Groq API or Gemini API."""
+    """Send a chat completion request to DeepSeek API or Gemini API."""
     selected_model = model or DEFAULT_MODEL
 
     # Sanitize model parameter to prevent local Ollama routing
