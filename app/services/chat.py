@@ -225,18 +225,18 @@ SYSTEM_PROMPT = (
     "El cierre lo gestiona el camarero desde el sistema.\n"
     "- Despues de anadir items, responde con lo que se ha anadido y pregunta '¿Algo mas?' de forma natural.\n"
     "- Cuando crees un pedido (create_order), el resultado incluye un menu_path. "
-    "Incluye el link en tu respuesta asi: [QR:menu_path] para que el cliente pueda escanear el QR y ver el menu. "
-    "Ejemplo: 'Pedido creado para la mesa 3. [QR:/menu/uuid-de-mesa] ¿Algo mas?'\n"
+    "Incluye el link en tu respuesta asi: {{QR:menu_path}} para que el cliente pueda escanear el QR y ver el menu. "
+    "Ejemplo: 'Pedido creado para la mesa 3. {{QR:/menu/uuid-de-mesa}} ¿Algo mas?'\n"
     "- Responde en el mismo idioma que el usuario.\n"
     "- Se conciso y directo.\n"
     "\n"
     "BOTONES INTERACTIVOS:\n"
-    "Puedes añadir botones interactivos en tus respuestas utilizando el formato exacto: [BUTTON:Texto del Botón:Mensaje de chat a enviar]\n"
+    "Puedes añadir botones interactivos en tus respuestas utilizando el formato exacto: {{BUTTON:Texto del Botón:Mensaje de chat a enviar}}\n"
     "Utiliza esto para facilitar la experiencia del usuario:\n"
     "- Al listar platos (ej: hamburguesas): pon un botón al lado de cada una para añadirla. Si no sabes la mesa actual, el mensaje del botón debe ser 'Añadir [nombre_plato]'. Si conoces la mesa, por ejemplo mesa 4, el mensaje debe ser 'Añadir 1 [nombre_plato] a la mesa 4'.\n"
-    "- Al confirmar que has añadido un plato: pon botones para quitarlo o modificar la cantidad. Ejemplo: '[BUTTON:Quitar 1:Quitar 1 [nombre_plato] de la mesa 4]' o '[BUTTON:Modificar:Cambiar cantidad de [nombre_plato] en la mesa 4 a 2]'.\n"
-    "- Al listar mesas o dar información de una mesa: pon botones para consultarla o abrirla. Ejemplo: '[BUTTON:Ver Mesa 4:qué hay en la mesa 4]' o '[BUTTON:Abrir Mesa 4:abre la mesa 4]'.\n"
-    "- Cuando el usuario no especifique la mesa para un pedido, además de preguntarle, lístale las mesas disponibles con botones para elegir. Ejemplo: 'Mesa 4: [BUTTON:Elegir:mesa 4]'.\n"
+    "- Al confirmar que has añadido un plato: pon botones para quitarlo o modificar la cantidad. Ejemplo: '{{BUTTON:Quitar 1:Quitar 1 [nombre_plato] de la mesa 4}}' o '{{BUTTON:Modificar:Cambiar cantidad de [nombre_plato] en la mesa 4 a 2}}'.\n"
+    "- Al listar mesas o dar información de una mesa: pon botones para consultarla o abrirla. Ejemplo: '{{BUTTON:Ver Mesa 4:qué hay en la mesa 4}}' o '{{BUTTON:Abrir Mesa 4:abre la mesa 4}}'.\n"
+    "- Cuando el usuario no especifique la mesa para un pedido, además de preguntarle, lístale las mesas disponibles con botones para elegir. Ejemplo: 'Mesa 4: {{BUTTON:Elegir:mesa 4}}'.\n"
     "\n"
     "PROCESO PARA QUITAR O MODIFICAR PLATOS DE UNA MESA:\n"
     "Cuando el usuario pida quitar, eliminar o cambiar la cantidad de un plato de una mesa (por ejemplo, al hacer clic en los botones de Quitar o Modificar):\n"
@@ -861,6 +861,7 @@ def stream_chat(
         if not tool_calls:
             content = assistant_msg.get("content", "")
             if content:
+                content = _translate_brackets(content)
                 yield _sse("message", {"content": content})
             yield _sse("done", {})
             return
@@ -907,11 +908,22 @@ def stream_chat(
         data = _llm_request(messages, model=model)
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         if content:
+            content = _translate_brackets(content)
             yield _sse("message", {"content": content})
     except Exception as e:
         yield _sse("error", {"message": f"LLM error: {str(e)}"})
 
     yield _sse("done", {})
+
+
+def _translate_brackets(text: str) -> str:
+    if not text:
+        return text
+    import re
+    text = re.sub(r"\{\{BUTTON:([^{}]+)\}\}", r"[BUTTON:\1]", text)
+    text = re.sub(r"\{\{QR:([^{}]+)\}\}", r"[QR:\1]", text)
+    text = text.replace("{{BUTTON:", "[BUTTON:").replace("{{QR:", "[QR:").replace("}}", "]")
+    return text
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
