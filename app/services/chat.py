@@ -21,8 +21,10 @@ DEFAULT_MODEL   = os.getenv("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct:free
 AVAILABLE_MODELS: list[dict[str, Any]] = [
     {"id": "meta-llama/llama-3.3-70b-instruct:free",                  "name": "Llama 3.3 70B (Recomendado)", "free": True, "tool_calling": "stable"},
     {"id": "google/gemma-4-31b-it:free",                              "name": "Gemma 4 31B",                "free": True, "tool_calling": "stable"},
-    {"id": "deepseek/deepseek-v4-flash:free",                         "name": "DeepSeek V4 Flash",          "free": True, "tool_calling": "stable"},
     {"id": "openrouter/free",                                         "name": "Auto Free Router",           "free": True, "tool_calling": "stable"},
+    {"id": "openai/gpt-5.4-mini",                                     "name": "GPT-5.4 Mini (Pago)",        "free": False, "tool_calling": "stable"},
+    {"id": "google/gemini-3.5-flash",                                 "name": "Gemini 3.5 Flash (Pago)",    "free": False, "tool_calling": "stable"},
+    {"id": "deepseek/deepseek-v4-flash",                              "name": "DeepSeek V4 Flash (Pago)",   "free": False, "tool_calling": "stable"},
 ]
 
 
