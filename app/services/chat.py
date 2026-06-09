@@ -30,13 +30,15 @@ def normalize_text(text: str) -> str:
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-DEFAULT_MODEL   = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+DEFAULT_MODEL   = os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 
 AVAILABLE_MODELS: list[dict[str, Any]] = [
-    {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B (Groq - Recomendado)", "free": True, "tool_calling": "stable"},
-    {"id": "llama-3.1-8b-instant",     "name": "Llama 3.1 8B (Groq - Rápido)",       "free": True, "tool_calling": "stable"},
-    {"id": "gemini-2.5-flash",        "name": "Gemini 2.5 Flash (Cloud)",           "free": True, "tool_calling": "stable"},
-    {"id": "gemini-2.5-pro",          "name": "Gemini 2.5 Pro (Cloud)",             "free": False, "tool_calling": "stable"},
+    {"id": "meta-llama/llama-4-scout-17b-16e-instruct", "name": "Llama 4 Scout 17B (Groq - Recomendado)", "free": True, "tool_calling": "stable"},
+    {"id": "qwen/qwen3-32b",                            "name": "Qwen 3 32B (Groq - Potente)",           "free": True, "tool_calling": "stable"},
+    {"id": "llama-3.3-70b-versatile",                   "name": "Llama 3.3 70B (Groq - Inestable)",      "free": True, "tool_calling": "stable"},
+    {"id": "llama-3.1-8b-instant",                      "name": "Llama 3.1 8B (Groq - Rápido)",          "free": True, "tool_calling": "stable"},
+    {"id": "gemini-2.5-flash",                          "name": "Gemini 2.5 Flash (Cloud)",              "free": True, "tool_calling": "stable"},
+    {"id": "gemini-2.5-pro",                            "name": "Gemini 2.5 Pro (Cloud)",                "free": False, "tool_calling": "stable"},
 ]
 
 
@@ -138,8 +140,8 @@ def _llm_request(
         if not groq_key:
             raise RuntimeError("GROQ_API_KEY not set in .env")
 
-        # Try Groq API, with up to 3 retries on transient errors (e.g. rate limits)
-        for attempt in range(3):
+        # Try Groq API, with up to 5 retries on transient errors or flaky tool calling
+        for attempt in range(5):
             try:
                 resp = http.post(
                     GROQ_URL,
@@ -153,10 +155,23 @@ def _llm_request(
                 resp.raise_for_status()
                 return resp.json()
             except http.HTTPStatusError as e:
+                print(f"Groq API Error Response (attempt {attempt+1}): {e.response.text}")
+                # Retry on rate limits or server errors
                 if e.response.status_code in (429, 502, 503, 504):
-                    if attempt < 2:
+                    if attempt < 4:
                         time.sleep(_parse_retry_after(e.response))
                         continue
+                # Retry on flaky Groq tool calling error (400 Bad Request with tool_use_failed)
+                if e.response.status_code == 400:
+                    try:
+                        err_data = e.response.json()
+                        err_code = err_data.get("error", {}).get("code")
+                        if err_code == "tool_use_failed" and attempt < 4:
+                            print(f"Detected flaky tool_use_failed on attempt {attempt+1}. Retrying in 0.2s...")
+                            time.sleep(0.2)
+                            continue
+                    except Exception:
+                        pass
                 raise e
 
 
@@ -262,7 +277,13 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "get_tables",
             "description": "Get all restaurant tables. Returns array of {id, number, status, active_order_id}. Use 'number' to match what the user says (e.g. 'mesa 1' = number:1) and 'id' as table_id for all other operations.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dummy": {"type": "string", "description": "Dummy parameter. Ignore this."}
+                },
+                "required": []
+            },
         },
     },
     {
@@ -333,7 +354,13 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "get_categories",
             "description": "List all active dish categories.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dummy": {"type": "string", "description": "Dummy parameter. Ignore this."}
+                },
+                "required": []
+            },
         },
     },
     {
@@ -341,7 +368,13 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "get_allergens",
             "description": "List all allergens.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dummy": {"type": "string", "description": "Dummy parameter. Ignore this."}
+                },
+                "required": []
+            },
         },
     },
     {
@@ -349,7 +382,13 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "get_daily_menus",
             "description": "Get active daily menus with sections and items.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dummy": {"type": "string", "description": "Dummy parameter. Ignore this."}
+                },
+                "required": []
+            },
         },
     },
     {
@@ -514,7 +553,13 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "get_billing_summary",
             "description": "Get today's total billing summary (cash closure / tancament de caixa) grouped by payment method.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dummy": {"type": "string", "description": "Dummy parameter. Ignore this."}
+                },
+                "required": []
+            }
         }
     }
 ]

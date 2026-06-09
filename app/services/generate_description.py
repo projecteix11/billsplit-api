@@ -5,7 +5,7 @@ import httpx as http
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 
 LANGUAGE_NAMES = {"es": "español", "en": "English", "ca": "català"}
 
