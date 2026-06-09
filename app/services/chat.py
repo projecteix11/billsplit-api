@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import unicodedata
 from typing import Any, Generator
 
 import httpx as http
@@ -12,6 +14,17 @@ from app.models import NewOrderItem
 from app.services import dishes as dish_svc
 from app.services import daily_menus as daily_menu_svc
 from app.services import orders as order_svc
+
+
+def normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.lower()
+    text = "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if unicodedata.category(c) != "Mn"
+    )
+    return "".join(c for c in text if c.isalnum())
 
 # -- LLM config ---------------------------------------------------------------
 
@@ -25,6 +38,8 @@ AVAILABLE_MODELS: list[dict[str, Any]] = [
     {"id": "gemini-3.1-pro",   "name": "Gemini 3.1 Pro",                 "free": False, "tool_calling": "stable"},
     {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash",               "free": True, "tool_calling": "stable"},
     {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash",               "free": True, "tool_calling": "stable"},
+    {"id": "ollama/qwen2.5:3b", "name": "Ollama: Qwen 2.5 3B (Local)",    "free": True, "tool_calling": "stable"},
+    {"id": "ollama/llama3.2:3b", "name": "Ollama: LLaMA 3.2 3B (Local)",  "free": True, "tool_calling": "stable"},
 ]
 
 
@@ -40,22 +55,86 @@ def _llm_request(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Send a chat completion request to Gemini API and return the JSON response."""
-    body: dict[str, Any] = {"model": model or DEFAULT_MODEL, "messages": messages}
+    """Send a chat completion request to Gemini API (with fallback) or local Ollama."""
+    selected_model = model or DEFAULT_MODEL
+
+    # Route to Ollama local instance
+    if selected_model.startswith("ollama/"):
+        ollama_model = selected_model.replace("ollama/", "")
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434/v1/chat/completions")
+        body: dict[str, Any] = {"model": ollama_model, "messages": messages}
+        if tools:
+            body["tools"] = tools
+
+        try:
+            resp = http.post(
+                ollama_url,
+                headers={"Content-Type": "application/json"},
+                json=body,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except http.ConnectError:
+            raise RuntimeError(
+                "No se pudo conectar a Ollama local. Asegúrate de tener la aplicación Ollama "
+                "iniciada en tu Mac y haber descargado el modelo ejecutando: `ollama run qwen2.5:3b`."
+            )
+        except Exception as e:
+            raise RuntimeError(f"Error de conexión con Ollama local: {str(e)}")
+
+    # Otherwise route to Gemini API
+    body: dict[str, Any] = {"model": selected_model, "messages": messages}
     if tools:
         body["tools"] = tools
 
-    resp = http.post(
-        GEMINI_URL,
-        headers={
-            "Authorization": f"Bearer {_api_key()}",
-            "Content-Type": "application/json",
-        },
-        json=body,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    primary_key = _api_key()
+    fallback_key = os.getenv("GEMINI_API_KEY_FALLBACK", "")
+
+    # Try primary key first, with up to 3 retries on transient errors (429, 502, 503, 504)
+    for attempt in range(3):
+        try:
+            resp = http.post(
+                GEMINI_URL,
+                headers={
+                    "Authorization": f"Bearer {primary_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except http.HTTPStatusError as e:
+            if e.response.status_code in (429, 502, 503, 504):
+                if attempt < 2:
+                    time.sleep(2.5)
+                    continue
+                if fallback_key:
+                    break
+            raise e
+
+    # Try fallback key, with up to 3 retries on transient errors (429, 502, 503, 504)
+    for attempt in range(3):
+        try:
+            resp = http.post(
+                GEMINI_URL,
+                headers={
+                    "Authorization": f"Bearer {fallback_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except http.HTTPStatusError as e:
+            if e.response.status_code in (429, 502, 503, 504):
+                if attempt < 2:
+                    time.sleep(2.5)
+                    continue
+            raise e
+
 
 
 # -- System prompt -------------------------------------------------------------
@@ -111,6 +190,25 @@ SYSTEM_PROMPT = (
     "Ejemplo: 'Pedido creado para la mesa 3. [QR:/menu/uuid-de-mesa] ¿Algo mas?'\n"
     "- Responde en el mismo idioma que el usuario.\n"
     "- Se conciso y directo.\n"
+    "\n"
+    "BOTONES INTERACTIVOS:\n"
+    "Puedes añadir botones interactivos en tus respuestas utilizando el formato exacto: [BUTTON:Texto del Botón:Mensaje de chat a enviar]\n"
+    "Utiliza esto para facilitar la experiencia del usuario:\n"
+    "- Al listar platos (ej: hamburguesas): pon un botón al lado de cada una para añadirla. Si no sabes la mesa actual, el mensaje del botón debe ser 'Añadir [nombre_plato]'. Si conoces la mesa, por ejemplo mesa 4, el mensaje debe ser 'Añadir 1 [nombre_plato] a la mesa 4'.\n"
+    "- Al confirmar que has añadido un plato: pon botones para quitarlo o modificar la cantidad. Ejemplo: '[BUTTON:Quitar 1:Quitar 1 [nombre_plato] de la mesa 4]' o '[BUTTON:Modificar:Cambiar cantidad de [nombre_plato] en la mesa 4 a 2]'.\n"
+    "- Al listar mesas o dar información de una mesa: pon botones para consultarla o abrirla. Ejemplo: '[BUTTON:Ver Mesa 4:qué hay en la mesa 4]' o '[BUTTON:Abrir Mesa 4:abre la mesa 4]'.\n"
+    "- Cuando el usuario no especifique la mesa para un pedido, además de preguntarle, lístale las mesas disponibles con botones para elegir. Ejemplo: 'Mesa 4: [BUTTON:Elegir:mesa 4]'.\n"
+    "\n"
+    "PROCESO PARA QUITAR O MODIFICAR PLATOS DE UNA MESA:\n"
+    "Cuando el usuario pida quitar, eliminar o cambiar la cantidad de un plato de una mesa (por ejemplo, al hacer clic en los botones de Quitar o Modificar):\n"
+    "1. Llama a get_tables() para obtener la lista de mesas y busca el table_id correspondiente al número de la mesa.\n"
+    "2. Llama a get_table_order(table_id) para obtener la orden activa de esa mesa y su lista de order_items.\n"
+    "3. Busca en la lista de items el que tenga el nombre del plato indicado (comparando de forma flexible o parcial) y obtén su 'id' (este es el item_id).\n"
+    "4. Si el usuario quiere QUITAR por completo el plato (o restar todas las unidades de manera que queden 0):\n"
+    "   Llama a delete_order_item(item_id).\n"
+    "5. Si el usuario quiere MODIFICAR la cantidad a un nuevo valor mayor que 0:\n"
+    "   Llama a update_item_quantity(item_id, nueva_cantidad).\n"
+    "6. Informa de forma natural y clara que el cambio se ha completado y muestra botones de confirmación correspondientes.\n"
     "\n"
     "Resolucion de mesas:\n"
     "- Si el usuario quiere hacer un pedido y NO ha indicado mesa, preguntale: '¿Para que mesa?'\n"
@@ -401,9 +499,25 @@ TOOLS: list[dict[str, Any]] = [
 # -- Tool execution ------------------------------------------------------------
 
 
-def _resolve_category_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _resolve_category_ids(items: list[Any]) -> list[dict[str, Any]]:
     """Resolve category_id from dish_id server-side to avoid FK errors from LLM hallucination."""
+    normalized_items = []
+    if not isinstance(items, list):
+        return []
     for item in items:
+        if isinstance(item, str):
+            item = {"dish_name": item, "dish_price": 0.0, "quantity": 1}
+        elif not isinstance(item, dict):
+            continue
+
+        # Ensure required fields for NewOrderItem are present
+        if "dish_name" not in item or not item["dish_name"]:
+            item["dish_name"] = "Artículo"
+        if "dish_price" not in item or item["dish_price"] is None:
+            item["dish_price"] = 0.0
+        if "quantity" not in item or item["quantity"] is None:
+            item["quantity"] = 1
+
         dish_id = item.get("dish_id")
         if dish_id:
             rows = get_client().table("dishes").select("category_id").eq("id", dish_id).execute().data or []
@@ -413,7 +527,8 @@ def _resolve_category_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 item.pop("category_id", None)
         else:
             item.pop("category_id", None)
-    return items
+        normalized_items.append(item)
+    return normalized_items
 
 
 def _execute_tool(name: str, args: dict[str, Any], tenant_id: str | None = None) -> str:
@@ -455,16 +570,42 @@ def _dispatch_tool(name: str, args: dict[str, Any], tenant_id: str | None = None
 
     if name == "search_menu":
         query = args.get("query", "").strip()
-        words = query.split()
         q = get_client().table("dishes").select("id,name,price,category_id").eq("is_available", True)
         if tenant_id:
             q = q.eq("tenant_id", tenant_id)
-        for w in words:
-            q = q.ilike("name", f"*{w}*")
         rows = q.execute().data or []
+        
         if not rows:
             return {"matches": [], "count": 0, "message": f"No dishes found matching '{query}'"}
-        return {"matches": [{"name": r["name"], "id": r["id"], "price": r["price"], "category_id": r["category_id"]} for r in rows], "count": len(rows)}
+
+        stop_words = {"un", "una", "unos", "unas", "el", "la", "los", "las", "de", "del", "y", "o", "con", "para", "por", "tambien", "mes", "mesa", "taula", "mesas"}
+        raw_words = query.lower().replace("-", " ").split()
+        search_words = [normalize_text(w) for w in raw_words if normalize_text(w) and normalize_text(w) not in stop_words]
+        
+        if not search_words:
+            search_words = [normalize_text(w) for w in raw_words if normalize_text(w)]
+
+        normalized_query_full = normalize_text(query)
+        matches = []
+        for r in rows:
+            dish_name = r["name"]
+            norm_dish = normalize_text(dish_name)
+            is_match = (
+                (normalized_query_full and normalized_query_full in norm_dish) or
+                (norm_dish and norm_dish in normalized_query_full) or
+                any(w in norm_dish for w in search_words)
+            )
+            if is_match:
+                matches.append({
+                    "name": dish_name,
+                    "id": r["id"],
+                    "price": r["price"],
+                    "category_id": r["category_id"]
+                })
+
+        if not matches:
+            return {"matches": [], "count": 0, "message": f"No dishes found matching '{query}'"}
+        return {"matches": matches, "count": len(matches)}
 
     if name == "get_dish_details":
         dish = dish_svc.get_dish_by_id(args["dish_id"])
