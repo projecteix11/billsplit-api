@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -41,6 +42,27 @@ def get_models(_user_id: str = Depends(require_auth)):
         "models": chat_svc.AVAILABLE_MODELS,
         "default": chat_svc.DEFAULT_MODEL,
     }
+
+
+@router.get("/chat/balance")
+def get_balance(_user_id: str = Depends(require_auth)):
+    # Query DeepSeek balance using its API key
+    key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not key:
+        return {"is_available": False, "error": "No DeepSeek API key configured"}
+
+    import httpx as http
+    try:
+        resp = http.get(
+            "https://api.deepseek.com/user/balance",
+            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        return {"is_available": False, "error": f"API returned status {resp.status_code}"}
+    except Exception as e:
+        return {"is_available": False, "error": str(e)}
 
 
 @router.post("/chat")
