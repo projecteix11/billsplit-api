@@ -28,16 +28,15 @@ def normalize_text(text: str) -> str:
 
 # -- LLM config ---------------------------------------------------------------
 
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-DEFAULT_MODEL   = os.getenv("LLM_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL   = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
 AVAILABLE_MODELS: list[dict[str, Any]] = [
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash (Recomendado)", "free": True, "tool_calling": "stable"},
-    {"id": "gemini-2.5-pro",   "name": "Gemini 2.5 Pro",                 "free": False, "tool_calling": "stable"},
-    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash (Alta demanda)",  "free": True, "tool_calling": "stable"},
-    {"id": "gemini-3.1-pro",   "name": "Gemini 3.1 Pro",                 "free": False, "tool_calling": "stable"},
-    {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash",               "free": True, "tool_calling": "stable"},
-    {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash",               "free": True, "tool_calling": "stable"},
+    {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B (Groq - Recomendado)", "free": True, "tool_calling": "stable"},
+    {"id": "llama-3.1-8b-instant",     "name": "Llama 3.1 8B (Groq - Rápido)",       "free": True, "tool_calling": "stable"},
+    {"id": "gemini-2.5-flash",        "name": "Gemini 2.5 Flash (Cloud)",           "free": True, "tool_calling": "stable"},
+    {"id": "gemini-2.5-pro",          "name": "Gemini 2.5 Pro (Cloud)",             "free": False, "tool_calling": "stable"},
 ]
 
 
@@ -53,65 +52,91 @@ def _llm_request(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Send a chat completion request to Gemini API (with retry and fallback)."""
+    """Send a chat completion request to Groq API or Gemini API."""
     selected_model = model or DEFAULT_MODEL
 
     # Sanitize model parameter to prevent local Ollama routing
     if selected_model.startswith("ollama/"):
         selected_model = DEFAULT_MODEL
 
-
-    # Otherwise route to Gemini API
     body: dict[str, Any] = {"model": selected_model, "messages": messages}
     if tools:
         body["tools"] = tools
 
-    primary_key = _api_key()
-    fallback_key = os.getenv("GEMINI_API_KEY_FALLBACK", "")
+    # Route based on model ID prefix
+    if selected_model.startswith("gemini-"):
+        primary_key = _api_key()
+        fallback_key = os.getenv("GEMINI_API_KEY_FALLBACK", "")
 
-    # Try primary key first, with up to 3 retries on transient errors (429, 502, 503, 504)
-    for attempt in range(3):
-        try:
-            resp = http.post(
-                GEMINI_URL,
-                headers={
-                    "Authorization": f"Bearer {primary_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except http.HTTPStatusError as e:
-            if e.response.status_code in (429, 502, 503, 504):
-                if attempt < 2:
-                    time.sleep(2.5)
-                    continue
-                if fallback_key:
-                    break
-            raise e
+        # Try primary key first, with up to 3 retries on transient errors (429, 502, 503, 504)
+        for attempt in range(3):
+            try:
+                resp = http.post(
+                    GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {primary_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                return resp.json()
+            except http.HTTPStatusError as e:
+                if e.response.status_code in (429, 502, 503, 504):
+                    if attempt < 2:
+                        time.sleep(2.5)
+                        continue
+                    if fallback_key:
+                        break
+                raise e
 
-    # Try fallback key, with up to 3 retries on transient errors (429, 502, 503, 504)
-    for attempt in range(3):
-        try:
-            resp = http.post(
-                GEMINI_URL,
-                headers={
-                    "Authorization": f"Bearer {fallback_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except http.HTTPStatusError as e:
-            if e.response.status_code in (429, 502, 503, 504):
-                if attempt < 2:
-                    time.sleep(2.5)
-                    continue
-            raise e
+        # Try fallback key, with up to 3 retries on transient errors (429, 502, 503, 504)
+        for attempt in range(3):
+            try:
+                resp = http.post(
+                    GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {fallback_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                return resp.json()
+            except http.HTTPStatusError as e:
+                if e.response.status_code in (429, 502, 503, 504):
+                    if attempt < 2:
+                        time.sleep(2.5)
+                        continue
+                raise e
+    else:
+        # Route to Groq API
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if not groq_key:
+            raise RuntimeError("GROQ_API_KEY not set in .env")
+
+        # Try Groq API, with up to 3 retries on transient errors (e.g. rate limits)
+        for attempt in range(3):
+            try:
+                resp = http.post(
+                    GROQ_URL,
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                return resp.json()
+            except http.HTTPStatusError as e:
+                if e.response.status_code in (429, 502, 503, 504):
+                    if attempt < 2:
+                        time.sleep(2.5)
+                        continue
+                raise e
 
 
 

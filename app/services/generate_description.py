@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import httpx as http
 
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
+MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
 LANGUAGE_NAMES = {"es": "español", "en": "English", "ca": "català"}
 
@@ -41,53 +42,83 @@ def generate(dish_name: str, language: str = "es") -> str:
         ],
     }
 
-    primary_key = _api_key()
-    fallback_key = os.getenv("GEMINI_API_KEY_FALLBACK", "")
+    # Route based on model ID prefix
+    if MODEL.startswith("gemini-"):
+        primary_key = _api_key()
+        fallback_key = os.getenv("GEMINI_API_KEY_FALLBACK", "")
 
-    # Try primary key first, with up to 3 retries on transient errors (429, 502, 503, 504)
-    for attempt in range(3):
-        try:
-            resp = http.post(
-                GEMINI_URL,
-                headers={
-                    "Authorization": f"Bearer {primary_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
-        except http.HTTPStatusError as e:
-            if e.response.status_code in (429, 502, 503, 504):
-                if attempt < 2:
-                    import time
-                    time.sleep(2.5)
-                    continue
-                if fallback_key:
-                    break
-            raise e
+        # Try primary key first, with up to 3 retries on transient errors (429, 502, 503, 504)
+        for attempt in range(3):
+            try:
+                resp = http.post(
+                    GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {primary_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"].strip()
+            except http.HTTPStatusError as e:
+                if e.response.status_code in (429, 502, 503, 504):
+                    if attempt < 2:
+                        import time
+                        time.sleep(2.5)
+                        continue
+                    if fallback_key:
+                        break
+                raise e
 
-    # Try fallback key, with up to 3 retries on transient errors (429, 502, 503, 504)
-    for attempt in range(3):
-        try:
-            resp = http.post(
-                GEMINI_URL,
-                headers={
-                    "Authorization": f"Bearer {fallback_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
-        except http.HTTPStatusError as e:
-            if e.response.status_code in (429, 502, 503, 504):
-                if attempt < 2:
-                    import time
-                    time.sleep(2.5)
-                    continue
-            raise e
+        # Try fallback key, with up to 3 retries on transient errors (429, 502, 503, 504)
+        for attempt in range(3):
+            try:
+                resp = http.post(
+                    GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {fallback_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"].strip()
+            except http.HTTPStatusError as e:
+                if e.response.status_code in (429, 502, 503, 504):
+                    if attempt < 2:
+                        import time
+                        time.sleep(2.5)
+                        continue
+                raise e
+    else:
+        # Route to Groq API
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if not groq_key:
+            raise RuntimeError("GROQ_API_KEY not set in .env")
+
+        # Try Groq API, with up to 3 retries on transient errors (429, 502, 503, 504)
+        for attempt in range(3):
+            try:
+                resp = http.post(
+                    GROQ_URL,
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"].strip()
+            except http.HTTPStatusError as e:
+                if e.response.status_code in (429, 502, 503, 504):
+                    if attempt < 2:
+                        import time
+                        time.sleep(2.5)
+                        continue
+                raise e
