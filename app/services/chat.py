@@ -16,34 +16,13 @@ from app.services import orders as order_svc
 # -- LLM config ---------------------------------------------------------------
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL   = os.getenv("LLM_MODEL", "google/gemma-4-31b-it:free")
+DEFAULT_MODEL   = os.getenv("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
 
 AVAILABLE_MODELS: list[dict[str, Any]] = [
+    {"id": "meta-llama/llama-3.3-70b-instruct:free",                  "name": "Llama 3.3 70B (Recomendado)", "free": True, "tool_calling": "stable"},
     {"id": "google/gemma-4-31b-it:free",                              "name": "Gemma 4 31B",                "free": True, "tool_calling": "stable"},
-    {"id": "google/gemma-4-26b-a4b-it:free",                         "name": "Gemma 4 26B A4B",            "free": True, "tool_calling": "stable"},
-    {"id": "meta-llama/llama-3.3-70b-instruct:free",                  "name": "Llama 3.3 70B",              "free": True, "tool_calling": "stable"},
-    {"id": "meta-llama/llama-3.2-3b-instruct:free",                   "name": "Llama 3.2 3B",               "free": True, "tool_calling": "experimental"},
     {"id": "deepseek/deepseek-v4-flash:free",                         "name": "DeepSeek V4 Flash",          "free": True, "tool_calling": "stable"},
-    {"id": "openai/gpt-oss-120b:free",                                "name": "OpenAI OSS 120B",            "free": True, "tool_calling": "stable"},
-    {"id": "openai/gpt-oss-20b:free",                                 "name": "OpenAI OSS 20B",             "free": True, "tool_calling": "stable"},
-    {"id": "nvidia/nemotron-3-super-120b-a12b:free",                  "name": "NVIDIA Nemotron 3 Super 120B","free": True, "tool_calling": "stable"},
-    {"id": "nvidia/nemotron-3-nano-30b-a3b:free",                     "name": "NVIDIA Nemotron Nano 30B",   "free": True, "tool_calling": "stable"},
-    {"id": "nvidia/nemotron-nano-12b-v2-vl:free",                     "name": "NVIDIA Nemotron Nano 12B",   "free": True, "tool_calling": "stable"},
-    {"id": "nvidia/nemotron-nano-9b-v2:free",                         "name": "NVIDIA Nemotron Nano 9B",    "free": True, "tool_calling": "stable"},
-    {"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",      "name": "NVIDIA Nemotron Omni 30B",   "free": True, "tool_calling": "experimental"},
-    {"id": "qwen/qwen3-next-80b-a3b-instruct:free",                   "name": "Qwen3 Next 80B",             "free": True, "tool_calling": "stable"},
-    {"id": "qwen/qwen3-coder:free",                                   "name": "Qwen3 Coder 480B",           "free": True, "tool_calling": "stable"},
-    {"id": "minimax/minimax-m2.5:free",                               "name": "MiniMax M2.5",               "free": True, "tool_calling": "stable"},
-    {"id": "nousresearch/hermes-3-llama-3.1-405b:free",               "name": "Hermes 3 Llama 405B",        "free": True, "tool_calling": "stable"},
-    {"id": "arcee-ai/trinity-large-thinking:free",                    "name": "Arcee Trinity Large",        "free": True, "tool_calling": "experimental"},
-    {"id": "poolside/laguna-m.1:free",                                "name": "Poolside Laguna M.1",        "free": True, "tool_calling": "stable"},
-    {"id": "poolside/laguna-xs.2:free",                               "name": "Poolside Laguna XS.2",       "free": True, "tool_calling": "stable"},
-    {"id": "z-ai/glm-4.5-air:free",                                   "name": "GLM 4.5 Air",                "free": True, "tool_calling": "stable"},
-    {"id": "inclusionai/ring-2.6-1t:free",                            "name": "Ring 2.6 1T",                "free": True, "tool_calling": "experimental"},
-    {"id": "baidu/cobuddy:free",                                      "name": "Baidu CoBuddy",              "free": True, "tool_calling": "experimental"},
-    {"id": "liquid/lfm-2.5-1.2b-instruct:free",                      "name": "LFM2.5 1.2B Instruct",       "free": True, "tool_calling": "experimental"},
-    {"id": "liquid/lfm-2.5-1.2b-thinking:free",                      "name": "LFM2.5 1.2B Thinking",       "free": True, "tool_calling": "experimental"},
-    {"id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", "name": "Dolphin Mistral 24B", "free": True, "tool_calling": "experimental"},
+    {"id": "openrouter/free",                                         "name": "Auto Free Router",           "free": True, "tool_calling": "stable"},
 ]
 
 
@@ -435,10 +414,10 @@ def _resolve_category_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return items
 
 
-def _execute_tool(name: str, args: dict[str, Any]) -> str:
+def _execute_tool(name: str, args: dict[str, Any], tenant_id: str | None = None) -> str:
     """Execute a tool call and return the JSON-serialized result."""
     try:
-        result = _dispatch_tool(name, args)
+        result = _dispatch_tool(name, args, tenant_id)
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
         import traceback
@@ -446,21 +425,27 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
-def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
+def _dispatch_tool(name: str, args: dict[str, Any], tenant_id: str | None = None) -> Any:
     """Route tool name to the appropriate service call."""
 
     if name == "get_tables":
-        rows = get_client().table("restaurant_tables").select("id,number,status,active_order_id").order("number").execute().data or []
+        q = get_client().table("restaurant_tables").select("id,number,status,active_order_id").order("number")
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        rows = q.execute().data or []
         return rows
 
     if name == "open_table":
         table_id = args["table_id"]
         table_number = args["table_number"]
-        get_client().table("restaurant_tables").update({"status": "waiting_order"}).eq("id", table_id).execute()
+        q = get_client().table("restaurant_tables").update({"status": "waiting_order"}).eq("id", table_id)
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
+        q.execute()
         return {"_refresh": True, "menu_path": f"/menu/{table_id}?num={table_number}", "message": f"Mesa {table_number} abierta"}
 
     if name == "get_menu":
-        dishes = dish_svc.get_dishes()
+        dishes = dish_svc.get_dishes(tenant_id) if tenant_id else []
         category_id = args.get("category_id")
         if category_id:
             dishes = [d for d in dishes if d.category_id == category_id]
@@ -468,9 +453,10 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
 
     if name == "search_menu":
         query = args.get("query", "").strip()
-        # Search each word with ilike at DB level — handles hyphens, accents, spacing
         words = query.split()
         q = get_client().table("dishes").select("id,name,price,category_id").eq("is_available", True)
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
         for w in words:
             q = q.ilike("name", f"*{w}*")
         rows = q.execute().data or []
@@ -485,7 +471,7 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         return dish.model_dump()
 
     if name == "get_categories":
-        cats = dish_svc.get_categories()
+        cats = dish_svc.get_categories(tenant_id) if tenant_id else []
         return [c.model_dump() for c in cats]
 
     if name == "get_allergens":
@@ -493,7 +479,7 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         return [a.model_dump() for a in allergens]
 
     if name == "get_daily_menus":
-        menus = daily_menu_svc.get_daily_menus()
+        menus = daily_menu_svc.get_daily_menus(tenant_id) if tenant_id else []
         return [m.model_dump() for m in menus]
 
     if name == "get_table_order":
@@ -510,7 +496,7 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
 
     if name == "create_order":
         items = [NewOrderItem(**item) for item in _resolve_category_ids(args["items"])]
-        order = order_svc.create_order(args["table_id"], args["table_number"], items)
+        order = order_svc.create_order(args["table_id"], args["table_number"], items, tenant_id=tenant_id or "")
         return {"_refresh": True, "menu_path": f"/menu/{args['table_id']}?num={args['table_number']}", **order.model_dump()}
 
     if name == "add_items_to_order":
@@ -519,20 +505,22 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         return {"_refresh": True, "message": "Items added successfully"}
 
     if name == "update_item_quantity":
-        order_svc.update_order_item_quantity(args["item_id"], args["quantity"])
+        order_svc.update_order_item_quantity(args["item_id"], args["quantity"], tenant_id=tenant_id or "")
         return {"message": "Quantity updated"}
 
     if name == "delete_order_item":
-        order_svc.delete_order_item(args["item_id"])
+        order_svc.delete_order_item(args["item_id"], tenant_id=tenant_id or "")
         return {"message": "Item deleted"}
 
     if name == "update_kitchen_status":
-        order_svc.update_item_kitchen_status(args["item_id"], args["status"])
+        order_svc.update_item_kitchen_status(args["item_id"], args["status"], tenant_id=tenant_id or "")
         return {"message": f"Kitchen status updated to {args['status']}"}
 
     if name == "check_stock":
         query = args.get("query", "").strip()
         q = get_client().table("stock_items").select("name,current_quantity,min_quantity,unit").eq("is_active", True)
+        if tenant_id:
+            q = q.eq("tenant_id", tenant_id)
         if query:
             q = q.ilike("name", f"*{query}*")
         rows = q.execute().data or []
@@ -551,11 +539,16 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         from datetime import date
         today_iso = date.today().isoformat()
         
-        # Query orders created today
-        orders_today = get_client().table("orders").select("total,status,amount_paid").gte("created_at", f"{today_iso}T00:00:00").execute().data or []
+        q_orders = get_client().table("orders").select("id,total,status,amount_paid").gte("created_at", f"{today_iso}T00:00:00")
+        if tenant_id:
+            q_orders = q_orders.eq("tenant_id", tenant_id)
+        orders_today = q_orders.execute().data or []
         
-        # Query payments created today
-        payments_today = get_client().table("payments").select("amount,payment_method,status").gte("created_at", f"{today_iso}T00:00:00").eq("status", "completed").execute().data or []
+        order_ids = [o["id"] for o in orders_today]
+        if order_ids:
+            payments_today = get_client().table("payments").select("amount,payment_method,status").in_("order_id", order_ids).eq("status", "completed").execute().data or []
+        else:
+            payments_today = []
         
         total_sales = sum(float(o["total"]) for o in orders_today)
         total_paid = sum(float(o["amount_paid"]) for o in orders_today)
@@ -677,7 +670,7 @@ def stream_chat(
                 metadata={"tool": fn_name, "args": fn_args},
             ))
 
-            result = _execute_tool(fn_name, fn_args)
+            result = _execute_tool(fn_name, fn_args, tenant_id)
 
             # Emit refresh event if a write tool modified order/table state
             try:

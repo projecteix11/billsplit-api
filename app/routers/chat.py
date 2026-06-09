@@ -68,6 +68,8 @@ def chat(
     if len(history) > MAX_HISTORY_LENGTH:
         history = history[-MAX_HISTORY_LENGTH:]
 
+    tenant_id = getattr(request.state, "tenant_id", "")
+
     return StreamingResponse(
         chat_svc.stream_chat(
             message=body.message,
@@ -78,6 +80,7 @@ def chat(
             features_kitchen=body.features_kitchen,
             features_web=body.features_web,
             device_context=body.device_context.model_dump() if body.device_context else None,
+            tenant_id=tenant_id,
         ),
         media_type="text/event-stream",
         headers={
