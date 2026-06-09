@@ -4,7 +4,7 @@ import os
 import httpx as http
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "openai/gpt-4.1-mini"
+MODEL = os.getenv("LLM_MODEL", "google/gemma-4-31b-it:free")
 
 LANGUAGE_NAMES = {"es": "español", "en": "English", "ca": "català"}
 
