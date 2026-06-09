@@ -603,6 +603,7 @@ def stream_chat(
     features_kitchen: bool = False,
     features_web: bool = False,
     device_context: dict[str, Any] | None = None,
+    tenant_id: str | None = None,
 ) -> Generator[str, None, None]:
     """Orchestrate the LLM chat with tool calling, yielding SSE events."""
 
