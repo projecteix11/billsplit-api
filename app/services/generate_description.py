@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import httpx as http
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = os.getenv("LLM_MODEL", "google/gemma-4-31b-it:free")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+MODEL = os.getenv("LLM_MODEL", "gemini-3.5-flash")
 
 LANGUAGE_NAMES = {"es": "español", "en": "English", "ca": "català"}
 
@@ -22,9 +22,9 @@ SYSTEM_PROMPT = (
 
 
 def _api_key() -> str:
-    key = os.getenv("OPENROUTER_API_KEY", "")
+    key = os.getenv("GEMINI_API_KEY", "")
     if not key:
-        raise RuntimeError("OPENROUTER_API_KEY not set")
+        raise RuntimeError("GEMINI_API_KEY not set")
     return key
 
 
@@ -33,7 +33,7 @@ def generate(dish_name: str, language: str = "es") -> str:
     system = SYSTEM_PROMPT.format(language=lang_name)
 
     resp = http.post(
-        OPENROUTER_URL,
+        GEMINI_URL,
         headers={
             "Authorization": f"Bearer {_api_key()}",
             "Content-Type": "application/json",

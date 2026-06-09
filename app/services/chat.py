@@ -15,23 +15,23 @@ from app.services import orders as order_svc
 
 # -- LLM config ---------------------------------------------------------------
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL   = os.getenv("LLM_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+DEFAULT_MODEL   = os.getenv("LLM_MODEL", "gemini-3.5-flash")
 
 AVAILABLE_MODELS: list[dict[str, Any]] = [
-    {"id": "meta-llama/llama-3.3-70b-instruct:free",                  "name": "Llama 3.3 70B (Recomendado)", "free": True, "tool_calling": "stable"},
-    {"id": "google/gemma-4-31b-it:free",                              "name": "Gemma 4 31B",                "free": True, "tool_calling": "stable"},
-    {"id": "openrouter/free",                                         "name": "Auto Free Router",           "free": True, "tool_calling": "stable"},
-    {"id": "openai/gpt-5.4-mini",                                     "name": "GPT-5.4 Mini (Pago)",        "free": False, "tool_calling": "stable"},
-    {"id": "google/gemini-3.5-flash",                                 "name": "Gemini 3.5 Flash (Pago)",    "free": False, "tool_calling": "stable"},
-    {"id": "deepseek/deepseek-v4-flash",                              "name": "DeepSeek V4 Flash (Pago)",   "free": False, "tool_calling": "stable"},
+    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash (Recomendado)", "free": True, "tool_calling": "stable"},
+    {"id": "gemini-3.1-pro",   "name": "Gemini 3.1 Pro",                 "free": False, "tool_calling": "stable"},
+    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash",               "free": True, "tool_calling": "stable"},
+    {"id": "gemini-2.5-pro",   "name": "Gemini 2.5 Pro",                 "free": False, "tool_calling": "stable"},
+    {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash",               "free": True, "tool_calling": "stable"},
+    {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash",               "free": True, "tool_calling": "stable"},
 ]
 
 
 def _api_key() -> str:
-    key = os.getenv("OPENROUTER_API_KEY", "")
+    key = os.getenv("GEMINI_API_KEY", "")
     if not key:
-        raise RuntimeError("OPENROUTER_API_KEY not set")
+        raise RuntimeError("GEMINI_API_KEY not set")
     return key
 
 
@@ -40,13 +40,13 @@ def _llm_request(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Send a chat completion request to OpenRouter and return the JSON response."""
+    """Send a chat completion request to Gemini API and return the JSON response."""
     body: dict[str, Any] = {"model": model or DEFAULT_MODEL, "messages": messages}
     if tools:
         body["tools"] = tools
 
     resp = http.post(
-        OPENROUTER_URL,
+        GEMINI_URL,
         headers={
             "Authorization": f"Bearer {_api_key()}",
             "Content-Type": "application/json",
