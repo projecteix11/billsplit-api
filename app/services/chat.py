@@ -38,8 +38,6 @@ AVAILABLE_MODELS: list[dict[str, Any]] = [
     {"id": "gemini-3.1-pro",   "name": "Gemini 3.1 Pro",                 "free": False, "tool_calling": "stable"},
     {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash",               "free": True, "tool_calling": "stable"},
     {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash",               "free": True, "tool_calling": "stable"},
-    {"id": "ollama/qwen2.5:3b", "name": "Ollama: Qwen 2.5 3B (Local)",    "free": True, "tool_calling": "stable"},
-    {"id": "ollama/llama3.2:3b", "name": "Ollama: LLaMA 3.2 3B (Local)",  "free": True, "tool_calling": "stable"},
 ]
 
 
@@ -55,33 +53,13 @@ def _llm_request(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Send a chat completion request to Gemini API (with fallback) or local Ollama."""
+    """Send a chat completion request to Gemini API (with retry and fallback)."""
     selected_model = model or DEFAULT_MODEL
 
-    # Route to Ollama local instance
+    # Sanitize model parameter to prevent local Ollama routing
     if selected_model.startswith("ollama/"):
-        ollama_model = selected_model.replace("ollama/", "")
-        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434/v1/chat/completions")
-        body: dict[str, Any] = {"model": ollama_model, "messages": messages}
-        if tools:
-            body["tools"] = tools
+        selected_model = DEFAULT_MODEL
 
-        try:
-            resp = http.post(
-                ollama_url,
-                headers={"Content-Type": "application/json"},
-                json=body,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except http.ConnectError:
-            raise RuntimeError(
-                "No se pudo conectar a Ollama local. Asegúrate de tener la aplicación Ollama "
-                "iniciada en tu Mac y haber descargado el modelo ejecutando: `ollama run qwen2.5:3b`."
-            )
-        except Exception as e:
-            raise RuntimeError(f"Error de conexión con Ollama local: {str(e)}")
 
     # Otherwise route to Gemini API
     body: dict[str, Any] = {"model": selected_model, "messages": messages}
