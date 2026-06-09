@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 import httpx as http
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-MODEL = os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 
 LANGUAGE_NAMES = {"es": "español", "en": "English", "ca": "català"}
 
@@ -116,18 +116,18 @@ def generate(dish_name: str, language: str = "es") -> str:
                         continue
                 raise e
     else:
-        # Route to Groq API
-        groq_key = os.getenv("GROQ_API_KEY", "")
-        if not groq_key:
-            raise RuntimeError("GROQ_API_KEY not set in .env")
+        # Route to DeepSeek API
+        deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+        if not deepseek_key:
+            raise RuntimeError("DEEPSEEK_API_KEY not set in .env")
 
-        # Try Groq API, with up to 3 retries on transient errors (429, 502, 503, 504)
+        # Try DeepSeek API, with up to 3 retries on transient errors (429, 502, 503, 504)
         for attempt in range(3):
             try:
                 resp = http.post(
-                    GROQ_URL,
+                    DEEPSEEK_URL,
                     headers={
-                        "Authorization": f"Bearer {groq_key}",
+                        "Authorization": f"Bearer {deepseek_key}",
                         "Content-Type": "application/json",
                     },
                     json=body,
