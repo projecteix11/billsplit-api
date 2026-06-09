@@ -31,24 +31,63 @@ def _api_key() -> str:
 def generate(dish_name: str, language: str = "es") -> str:
     lang_name = LANGUAGE_NAMES.get(language, "español")
     system = SYSTEM_PROMPT.format(language=lang_name)
+    body = {
+        "model": MODEL,
+        "max_tokens": 150,
+        "temperature": 0.7,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Plato: {dish_name}"},
+        ],
+    }
 
-    resp = http.post(
-        GEMINI_URL,
-        headers={
-            "Authorization": f"Bearer {_api_key()}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "max_tokens": 150,
-            "temperature": 0.7,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"Plato: {dish_name}"},
-            ],
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+    primary_key = _api_key()
+    fallback_key = os.getenv("GEMINI_API_KEY_FALLBACK", "")
+
+    # Try primary key first, with up to 3 retries on transient errors (429, 502, 503, 504)
+    for attempt in range(3):
+        try:
+            resp = http.post(
+                GEMINI_URL,
+                headers={
+                    "Authorization": f"Bearer {primary_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+        except http.HTTPStatusError as e:
+            if e.response.status_code in (429, 502, 503, 504):
+                if attempt < 2:
+                    import time
+                    time.sleep(2.5)
+                    continue
+                if fallback_key:
+                    break
+            raise e
+
+    # Try fallback key, with up to 3 retries on transient errors (429, 502, 503, 504)
+    for attempt in range(3):
+        try:
+            resp = http.post(
+                GEMINI_URL,
+                headers={
+                    "Authorization": f"Bearer {fallback_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+        except http.HTTPStatusError as e:
+            if e.response.status_code in (429, 502, 503, 504):
+                if attempt < 2:
+                    import time
+                    time.sleep(2.5)
+                    continue
+            raise e
