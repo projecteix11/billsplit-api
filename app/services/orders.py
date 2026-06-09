@@ -598,6 +598,7 @@ def _build_and_insert_items(
             "customization": enriched_cust,
             "original_price": item.original_price,
             "price_override_reason": item.price_override_reason,
+            "source": item.source or "management",
         }
         rows.append(row)
 
