@@ -172,6 +172,12 @@ SYSTEM_PROMPT = (
     "- Consultar niveles de stock/inventario de ingredientes o articulos\n"
     "- Obtener resumenes de facturacion y cierre de caja del dia\n"
     "\n"
+    "REGLA DE ORO DE BUSQUEDA Y DISAMBIGUACION:\n"
+    "NUNCA asumas el plato exacto que quiere el usuario ni crees un pedido sin haber buscado primero. "
+    "Si el usuario dice 'una burger', 'coca cola', o cualquier nombre de plato, es OBLIGATORIO llamar "
+    "primero a search_menu(query) para ver que platos coinciden. Si hay 2 o mas coincidencias, "
+    "DEBES mostrarlas y esperar a que el usuario elija. NUNCA asumas una de las opciones.\n"
+    "\n"
     "PROCESO OBLIGATORIO PARA CADA PLATO (seguir en orden estricto):\n"
     "1. search_menu(query) → buscar coincidencias\n"
     "2. Si count>=2 → listar opciones y ESPERAR a que el usuario elija\n"
@@ -792,6 +798,89 @@ Quan et demanin actualitzar l'estat d'un plat, usa update_kitchen_status amb els
 """
 
 
+def _extract_dsml_tool_calls(assistant_msg: dict[str, Any]) -> None:
+    """
+    Parse leaked XML-like DSML tool calls from assistant message content.
+    DeepSeek models sometimes output DSML tags directly in text if the parser fails.
+    """
+    content = assistant_msg.get("content")
+    if not content:
+        return
+
+    # Strip <think>...</think> blocks from content
+    import re
+    think_pattern = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
+    content = think_pattern.sub("", content).strip()
+    assistant_msg["content"] = content
+
+    # Look for DSML tags using either full-width pipe (｜) or regular pipe (|)
+    dsml_pattern = re.compile(
+        r"<[｜|]{2}DSML[｜|]{2}tool_calls>([\s\S]*?)</[｜|]{2}DSML[｜|]{2}tool_calls>",
+        re.IGNORECASE
+    )
+    match_block = dsml_pattern.search(content)
+    if not match_block:
+        return
+
+    tool_calls_text = match_block.group(1)
+
+    # Parse invokes: <||DSML||invoke name="FUNC_NAME"> ... </||DSML||invoke>
+    invoke_pattern = re.compile(
+        r"<[｜|]{2}DSML[｜|]{2}invoke name=\"([^\"]+)\">([\s\S]*?)</[｜|]{2}DSML[｜|]{2}invoke>",
+        re.IGNORECASE
+    )
+    # Parse parameters: <||DSML||parameter name="PARAM_NAME" ...>PARAM_VALUE</||DSML||parameter>
+    param_pattern = re.compile(
+        r"<[｜|]{2}DSML[｜|]{2}parameter name=\"([^\"]+)\"(?:\s+[a-zA-Z_]+=\"[^\"]*\")*>([\s\S]*?)</[｜|]{2}DSML[｜|]{2}parameter>",
+        re.IGNORECASE
+    )
+
+    parsed_calls = []
+    import json
+    import uuid
+
+    for invoke_match in invoke_pattern.finditer(tool_calls_text):
+        func_name = invoke_match.group(1)
+        params_block = invoke_match.group(2)
+
+        args = {}
+        for param_match in param_pattern.finditer(params_block):
+            p_name = param_match.group(1)
+            p_val = param_match.group(2).strip()
+
+            # Try to convert to type based on value
+            if p_val.lower() == "true":
+                args[p_name] = True
+            elif p_val.lower() == "false":
+                args[p_name] = False
+            elif p_val.isdigit():
+                args[p_name] = int(p_val)
+            else:
+                try:
+                    args[p_name] = float(p_val)
+                except ValueError:
+                    args[p_name] = p_val
+
+        call_id = f"call_{uuid.uuid4().hex[:12]}"
+        parsed_calls.append({
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": func_name,
+                "arguments": json.dumps(args, ensure_ascii=False)
+            }
+        })
+
+    if parsed_calls:
+        # Strip the DSML block from content
+        clean_content = dsml_pattern.sub("", content).strip()
+        assistant_msg["content"] = clean_content
+
+        # Populate tool_calls
+        if "tool_calls" not in assistant_msg or not assistant_msg["tool_calls"]:
+            assistant_msg["tool_calls"] = parsed_calls
+
+
 def stream_chat(
     message: str,
     conversation_history: list[dict[str, str]],
@@ -843,6 +932,7 @@ def stream_chat(
         choice = data.get("choices", [{}])[0]
         assistant_msg = choice.get("message", {})
 
+        _extract_dsml_tool_calls(assistant_msg)
         tool_calls = assistant_msg.get("tool_calls")
         if not tool_calls:
             content = assistant_msg.get("content", "")
@@ -906,6 +996,14 @@ def _translate_brackets(text: str) -> str:
     if not text:
         return text
     import re
+    # Strip <think>...</think> blocks from content
+    think_pattern = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
+    text = think_pattern.sub("", text).strip()
+
+    # Strip any DSML tags just in case they leak to final text
+    dsml_pattern = re.compile(r"<[｜|]{2}DSML[｜|]{2}[^>]+>", re.IGNORECASE)
+    text = dsml_pattern.sub("", text).strip()
+
     text = re.sub(r"\{\{BUTTON:([^{}]+)\}\}", r"[BUTTON:\1]", text)
     text = re.sub(r"\{\{QR:([^{}]+)\}\}", r"[QR:\1]", text)
     text = text.replace("{{BUTTON:", "[BUTTON:").replace("{{QR:", "[QR:").replace("}}", "]")
