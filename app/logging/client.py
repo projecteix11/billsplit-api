@@ -16,10 +16,22 @@ _dataset = ""
 
 def init() -> None:
     global _client, _dataset
-    token = os.getenv("AXIOM_TOKEN", "")
-    _dataset = os.getenv("AXIOM_DATASET", "gobbly-management")
+    # Canonical names are AXIOM_TOKEN / AXIOM_DATASET; the VITE_-prefixed
+    # variants are accepted because older deploy configs defined those.
+    token = os.getenv("AXIOM_TOKEN", "") or os.getenv("VITE_AXIOM_TOKEN", "")
+    _dataset = (
+        os.getenv("AXIOM_DATASET", "")
+        or os.getenv("VITE_AXIOM_DATASET", "")
+        or "gobbly-management"
+    )
     if token:
         _client = axiom_py.Client(token=token)
+        print(f"[logging] Axiom logging ENABLED (dataset={_dataset})")
+    else:
+        print(
+            "[logging] Axiom logging DISABLED — AXIOM_TOKEN is not set; "
+            "all log events will be dropped"
+        )
 
 
 def _send(event: dict) -> None:
