@@ -116,21 +116,14 @@ class TestUnprotectedRoutes:
             resp = client.get("/orders/some-order")
         assert resp.status_code != 401
 
-    def test_payment_status_no_auth_returns_200(self, client: TestClient):
-        from unittest.mock import MagicMock
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[{"id": "i-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
-            MagicMock(data=None),
-            MagicMock(data=[]),
-        ]
-        with patch("app.services.orders.get_client") as mock_gc:
-            mock_gc.return_value = mock_q
-            resp = client.patch(
-                "/order-items/payment-status",
-                json={"itemIds": ["i-1"], "status": "paid"},
-            )
-        assert resp.status_code == 200
+    def test_payment_status_paid_requires_auth(self, client: TestClient):
+        # Marking items paid is staff-only now (Master Ecosystem Report XC-1):
+        # an unauthenticated caller must NOT be able to flip payment_status='paid'.
+        resp = client.patch(
+            "/order-items/payment-status",
+            json={"itemIds": ["i-1"], "status": "paid"},
+        )
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

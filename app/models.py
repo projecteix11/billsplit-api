@@ -346,8 +346,15 @@ class UpdatePriceBody(BaseModel):
     reason: Optional[str] = None
 
 
-class RedsysSignBody(BaseModel):
-    amount: float
+class RedsysInitiateItem(BaseModel):
+    itemId: str
+    portions: int = 1
+
+
+class RedsysInitiateBody(BaseModel):
+    orderId: str
+    items: list[RedsysInitiateItem]
+    method: str
     urlOk: str
     urlKo: str
 

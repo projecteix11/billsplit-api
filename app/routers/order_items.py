@@ -65,7 +65,7 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
 
 @router.patch("/order-items/payment-status")
 @limiter.limit("20/minute")
-def update_payment_status(request: Request, body: PaymentStatusBody, tenant_id: str = Depends(require_feature("payments"))):
+def update_payment_status(request: Request, body: PaymentStatusBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(require_feature("payments"))):
     if not body.itemIds:
         return JSONResponse(status_code=400, content={"data": None, "error": "itemIds[] is required"})
     if body.status not in VALID_PAYMENT_STATUSES:
@@ -112,7 +112,7 @@ def update_payment_status(request: Request, body: PaymentStatusBody, tenant_id: 
 
 @router.patch("/order-items/payment-portions")
 @limiter.limit("20/minute")
-def update_payment_portions(request: Request, body: PaymentPortionsBody, tenant_id: str = Depends(require_feature("payments"))):
+def update_payment_portions(request: Request, body: PaymentPortionsBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(require_feature("payments"))):
     if not body.allocations:
         return JSONResponse(status_code=400, content={"data": None, "error": "allocations[] is required"})
     for allocation in body.allocations:

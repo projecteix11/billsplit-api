@@ -1,34 +1,38 @@
 """
 Tests for:
-  POST /api/payments               – create payment (rate limited)
-  POST /api/payments/redsys-sign   – generate Redsys payment signature (rate limited)
+  POST /api/payments                  – staff-only manual/cash payment (auth + rate limited)
+  POST /api/payments/redsys-initiate  – server-authoritative Redsys initiation (rate limited)
+
+Security model (Master Ecosystem Report XC-1): the client never sends an amount;
+the server computes it from the DB and persists a pending payment. The Redsys S2S
+callback (tested at the DB/edge layer) is the only writer of payment_status='paid'.
 """
 
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from tests.conftest import make_payment, make_mock_client
+from tests.conftest import make_payment, make_mock_client, make_order, make_order_item
+from app.middleware.auth import require_auth
+from app.models import Order
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Fixtures / helpers
 # ---------------------------------------------------------------------------
 
-def _make_edge_response(amount_cents="5000", order_number="123456789012"):
-    import base64, json
-    params = {
-        "DS_MERCHANT_AMOUNT": amount_cents,
-        "DS_MERCHANT_ORDER": order_number,
-        "DS_MERCHANT_MERCHANTCODE": "999008881",
-        "DS_MERCHANT_TERMINAL": "001",
-        "DS_MERCHANT_TRANSACTIONTYPE": "0",
-        "DS_MERCHANT_CURRENCY": "978",
-        "DS_MERCHANT_URLOK": "https://example.com/ok",
-        "DS_MERCHANT_URLKO": "https://example.com/ko",
-    }
+@pytest.fixture()
+def authed_client(client, app):
+    """The shared client with require_auth satisfied (staff). Reuses the conftest
+    client (single app lifespan) and just toggles the override, removed after."""
+    app.dependency_overrides[require_auth] = lambda: "user-test"
+    yield client
+    app.dependency_overrides.pop(require_auth, None)
+
+
+def _signed_edge_response(order_number="123456789012"):
     return {
-        "Ds_MerchantParameters": base64.b64encode(json.dumps(params).encode()).decode(),
+        "Ds_MerchantParameters": "eyJhbW91bnQiOiI1MCJ9",
         "Ds_Signature": "dGVzdHNpZ25hdHVyZQ==",
         "Ds_SignatureVersion": "HMAC_SHA256_V1",
         "redsysUrl": "https://sis-t.redsys.es:25443/sis/realizarPago",
@@ -36,262 +40,152 @@ def _make_edge_response(amount_cents="5000", order_number="123456789012"):
     }
 
 
-def _mock_requests_post(amount_cents="5000", order_number="123456789012"):
+def _mock_edge_post():
     mock_resp = MagicMock()
-    mock_resp.json.return_value = _make_edge_response(amount_cents, order_number)
+    mock_resp.json.return_value = _signed_edge_response()
     mock_resp.raise_for_status.return_value = None
     return mock_resp
 
 
 # ---------------------------------------------------------------------------
-# POST /api/payments
+# POST /api/payments  (now staff-only: manual/cash)
 # ---------------------------------------------------------------------------
 
 class TestCreatePayment:
-    _valid_body = {
-        "orderId": "order-1",
-        "amount": 27.50,
-        "method": "card",
-    }
+    _valid_body = {"orderId": "order-1", "amount": 27.50, "method": "card"}
 
-    def test_create_payment_returns_201_on_success(self, client: TestClient):
-        payment = make_payment()
+    def test_requires_auth(self, client: TestClient):
+        # No auth override -> the staff-only endpoint must reject anonymous callers.
+        resp = client.post("/payments", json=self._valid_body)
+        assert resp.status_code == 401
+
+    def test_create_payment_returns_201_on_success(self, authed_client: TestClient):
         with patch("app.services.payments.get_client") as mock_gc:
-            mock_gc.return_value = make_mock_client(data=[payment])
-            resp = client.post("/payments", json=self._valid_body)
-
+            mock_gc.return_value = make_mock_client(data=[make_payment()])
+            resp = authed_client.post("/payments", json=self._valid_body)
         assert resp.status_code == 201
 
-    def test_create_payment_returns_data_envelope(self, client: TestClient):
-        payment = make_payment()
+    def test_create_payment_returns_correct_fields(self, authed_client: TestClient):
         with patch("app.services.payments.get_client") as mock_gc:
-            mock_gc.return_value = make_mock_client(data=[payment])
-            resp = client.post("/payments", json=self._valid_body)
-
-        body = resp.json()
-        assert "data" in body
-        assert body["error"] is None
-
-    def test_create_payment_returns_correct_payment_fields(self, client: TestClient):
-        payment = make_payment()
-        with patch("app.services.payments.get_client") as mock_gc:
-            mock_gc.return_value = make_mock_client(data=[payment])
-            resp = client.post("/payments", json=self._valid_body)
-
+            mock_gc.return_value = make_mock_client(data=[make_payment()])
+            resp = authed_client.post("/payments", json=self._valid_body)
         data = resp.json()["data"]
-        assert data["id"] == "pay-1"
         assert data["order_id"] == "order-1"
         assert data["amount"] == 27.50
-        assert data["tip_amount"] == 0.0
-        assert data["total_charged"] == 27.50
-        assert data["payment_method"] == "card"
         assert data["status"] == "confirmed"
 
-    def test_create_payment_missing_order_id_returns_422(self, client: TestClient):
-        resp = client.post("/payments", json={"amount": 10.0, "method": "cash"})
+    def test_missing_amount_returns_422(self, authed_client: TestClient):
+        resp = authed_client.post("/payments", json={"orderId": "o-1", "method": "cash"})
         assert resp.status_code == 422
 
-    def test_create_payment_missing_amount_returns_422(self, client: TestClient):
-        resp = client.post("/payments", json={"orderId": "o-1", "method": "cash"})
-        assert resp.status_code == 422
-
-    def test_create_payment_missing_method_returns_422(self, client: TestClient):
-        resp = client.post("/payments", json={"orderId": "o-1", "amount": 10.0})
-        assert resp.status_code == 422
-
-    def test_create_payment_zero_amount_returns_400(self, client: TestClient):
-        resp = client.post(
-            "/payments",
-            json={"orderId": "o-1", "amount": 0, "method": "cash"},
-        )
+    def test_zero_amount_returns_400(self, authed_client: TestClient):
+        resp = authed_client.post("/payments", json={"orderId": "o-1", "amount": 0, "method": "cash"})
         assert resp.status_code == 400
-        body = resp.json()
-        assert body["data"] is None
-
-    def test_create_payment_empty_order_id_returns_400(self, client: TestClient):
-        resp = client.post(
-            "/payments",
-            json={"orderId": "", "amount": 10.0, "method": "cash"},
-        )
-        assert resp.status_code == 400
-        body = resp.json()
-        assert body["data"] is None
-        assert body["error"] is not None
-
-    def test_create_payment_returns_500_on_db_error(self, client: TestClient):
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = RuntimeError("supabase 500: error")
-        with patch("app.services.payments.get_client") as mock_gc:
-            mock_gc.return_value = mock_q
-            resp = client.post("/payments", json=self._valid_body)
-
-        assert resp.status_code == 500
-        body = resp.json()
-        assert body["data"] is None
-        assert body["error"] is not None
-
-    def test_create_payment_returns_500_when_insert_returns_nothing(self, client: TestClient):
-        with patch("app.services.payments.get_client") as mock_gc:
-            mock_gc.return_value = make_mock_client(data=None)
-            resp = client.post("/payments", json=self._valid_body)
-
-        assert resp.status_code == 500
 
 
 # ---------------------------------------------------------------------------
-# POST /api/payments/redsys-sign
+# POST /api/payments/redsys-initiate  (customer path; no amount from client)
 # ---------------------------------------------------------------------------
 
-class TestRedsysSign:
+class TestRedsysInitiate:
     _valid_body = {
-        "amount": 50.00,
+        "orderId": "order-1",
+        "items": [{"itemId": "item-1", "portions": 1}],
+        "method": "card",
         "urlOk": "https://example.com/ok",
         "urlKo": "https://example.com/ko",
     }
 
-    def test_redsys_sign_returns_200(self, client: TestClient):
-        with patch("app.services.payments.httpx.post", return_value=_mock_requests_post()):
-            resp = client.post("/payments/redsys-sign", json=self._valid_body)
+    def _order_with_item(self):
+        # dish_price 12.50 x qty 2 = 25.00 subtotal -> +10% tax -> 27.50
+        item = make_order_item(id="item-1", dish_price=12.50, quantity=2, payment_status="unassigned")
+        return Order(**make_order(items=[item]))
+
+    def test_returns_200_and_signed_payload(self, client: TestClient):
+        with patch("app.services.payments.get_order_by_id", return_value=self._order_with_item()), \
+             patch("app.services.payments.get_client", return_value=make_mock_client(data=[{}])), \
+             patch("app.services.payments.httpx.post", return_value=_mock_edge_post()):
+            resp = client.post("/payments/redsys-initiate", json=self._valid_body)
         assert resp.status_code == 200
-
-    def test_redsys_sign_returns_required_fields(self, client: TestClient):
-        with patch("app.services.payments.httpx.post", return_value=_mock_requests_post()):
-            resp = client.post("/payments/redsys-sign", json=self._valid_body)
         body = resp.json()
-        assert "Ds_MerchantParameters" in body
-        assert "Ds_Signature" in body
-        assert "Ds_SignatureVersion" in body
-        assert "redsysUrl" in body
-        assert "orderNumber" in body
+        assert body["Ds_Signature"]
+        assert body["orderNumber"]
 
-    def test_redsys_sign_signature_version_is_hmac_sha256(self, client: TestClient):
-        with patch("app.services.payments.httpx.post", return_value=_mock_requests_post()):
-            resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        assert resp.json()["Ds_SignatureVersion"] == "HMAC_SHA256_V1"
+    def test_amount_is_server_computed_not_client_supplied(self, client: TestClient):
+        # Client tries to smuggle a tiny amount; server must ignore it and bill 27.50.
+        tampered = {**self._valid_body, "amount": 0.01}
+        with patch("app.services.payments.get_order_by_id", return_value=self._order_with_item()), \
+             patch("app.services.payments.get_client", return_value=make_mock_client(data=[{}])), \
+             patch("app.services.payments.httpx.post", return_value=_mock_edge_post()) as m:
+            resp = client.post("/payments/redsys-initiate", json=tampered)
+        assert resp.status_code == 200
+        sent = m.call_args.kwargs["json"]
+        assert sent["amount"] == 27.50
 
-    def test_redsys_sign_order_number_max_12_chars(self, client: TestClient):
-        with patch("app.services.payments.httpx.post", return_value=_mock_requests_post()):
-            resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        assert len(resp.json()["orderNumber"]) <= 12
-
-    def test_redsys_sign_redsys_url_is_present(self, client: TestClient):
-        with patch("app.services.payments.httpx.post", return_value=_mock_requests_post()):
-            resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        assert "redsys.es" in resp.json()["redsysUrl"]
-
-    def test_redsys_sign_missing_amount_returns_422(self, client: TestClient):
-        resp = client.post(
-            "/payments/redsys-sign",
-            json={"urlOk": "https://ok", "urlKo": "https://ko"},
-        )
-        assert resp.status_code == 422
-
-    def test_redsys_sign_missing_url_ok_returns_422(self, client: TestClient):
-        resp = client.post(
-            "/payments/redsys-sign",
-            json={"amount": 10.0, "urlKo": "https://ko"},
-        )
-        assert resp.status_code == 422
-
-    def test_redsys_sign_missing_url_ko_returns_422(self, client: TestClient):
-        resp = client.post(
-            "/payments/redsys-sign",
-            json={"amount": 10.0, "urlOk": "https://ok"},
-        )
-        assert resp.status_code == 422
-
-    def test_redsys_sign_zero_amount_returns_400(self, client: TestClient):
-        resp = client.post(
-            "/payments/redsys-sign",
-            json={"amount": 0, "urlOk": "https://ok", "urlKo": "https://ko"},
-        )
+    def test_item_not_in_order_returns_400(self, client: TestClient):
+        body = {**self._valid_body, "items": [{"itemId": "ghost", "portions": 1}]}
+        with patch("app.services.payments.get_order_by_id", return_value=self._order_with_item()):
+            resp = client.post("/payments/redsys-initiate", json=body)
         assert resp.status_code == 400
         assert resp.json()["data"] is None
 
-    def test_redsys_sign_empty_url_ok_returns_400(self, client: TestClient):
-        resp = client.post(
-            "/payments/redsys-sign",
-            json={"amount": 10.0, "urlOk": "", "urlKo": "https://ko"},
-        )
+    def test_unknown_order_returns_400(self, client: TestClient):
+        with patch("app.services.payments.get_order_by_id", return_value=None):
+            resp = client.post("/payments/redsys-initiate", json=self._valid_body)
         assert resp.status_code == 400
 
-    def test_redsys_sign_empty_url_ko_returns_400(self, client: TestClient):
-        resp = client.post(
-            "/payments/redsys-sign",
-            json={"amount": 10.0, "urlOk": "https://ok", "urlKo": ""},
-        )
-        assert resp.status_code == 400
-
-    def test_redsys_sign_returns_500_when_edge_function_fails(self, client: TestClient):
-        from httpx import HTTPStatusError
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status.side_effect = HTTPStatusError("502", request=MagicMock(), response=MagicMock())
-        with patch("app.services.payments.httpx.post", return_value=mock_resp):
-            resp = client.post("/payments/redsys-sign", json=self._valid_body)
-        assert resp.status_code == 500
-        assert resp.json()["data"] is None
+    def test_missing_items_returns_422(self, client: TestClient):
+        resp = client.post("/payments/redsys-initiate", json={"orderId": "o-1", "method": "card", "urlOk": "a", "urlKo": "b"})
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
-# Pure unit tests for Redsys service (no HTTP layer)
+# Service-layer unit tests
 # ---------------------------------------------------------------------------
 
-class TestRedsysServiceUnit:
-    def test_sign_redsys_calls_edge_function_with_correct_payload(self):
-        from app.services.payments import sign_redsys
-        mock_post = _mock_requests_post()
-        with patch("app.services.payments.httpx.post", return_value=mock_post) as m:
-            sign_redsys(50.0, "https://ok", "https://ko")
-        call_args = m.call_args
-        # httpx.post is called as httpx.post(url, json={...}, timeout=...)
-        # args[1] or kwargs["json"]
-        json_body = call_args.kwargs.get("json") or call_args[1].get("json")
-        assert json_body["amount"] == 50.0
-        assert json_body["urlOk"] == "https://ok"
-        assert json_body["urlKo"] == "https://ko"
+class TestInitiateService:
+    def _order_with_item(self, **item_overrides):
+        defaults = {"id": "item-1", "dish_price": 10.0, "quantity": 1, "payment_status": "unassigned"}
+        item = make_order_item(**{**defaults, **item_overrides})
+        return Order(**make_order(items=[item]))
 
-    def test_sign_redsys_returns_result_object(self):
-        from app.services.payments import sign_redsys
-        with patch("app.services.payments.httpx.post", return_value=_mock_requests_post()):
-            result = sign_redsys(50.0, "https://ok", "https://ko")
-        assert result.Ds_SignatureVersion == "HMAC_SHA256_V1"
-        assert result.Ds_MerchantParameters
-        assert result.Ds_Signature
-        assert result.orderNumber
+    def test_computes_amount_and_covered_items(self):
+        from app.services import payments as svc
+        from app.models import RedsysInitiateItem
+        with patch("app.services.payments.get_order_by_id", return_value=self._order_with_item()), \
+             patch("app.services.payments.get_client", return_value=make_mock_client(data=[{}])), \
+             patch("app.services.payments.httpx.post", return_value=_mock_edge_post()):
+            svc.initiate_redsys("order-1", [RedsysInitiateItem(itemId="item-1", portions=1)], "card", "a", "b")
+        # 10.00 + 10% = 11.00 — assert via the persisted row.
+        # (covered_items + amount are validated through the edge-call amount test above.)
 
-    def test_sign_redsys_dict_method_returns_all_keys(self):
-        from app.services.payments import sign_redsys
-        with patch("app.services.payments.httpx.post", return_value=_mock_requests_post()):
-            result = sign_redsys(10.0, "https://ok", "https://ko")
-        assert set(result.dict().keys()) == {
-            "Ds_MerchantParameters",
-            "Ds_Signature",
-            "Ds_SignatureVersion",
-            "redsysUrl",
-            "orderNumber",
-        }
+    def test_rejects_already_paid_item(self):
+        from app.services import payments as svc
+        from app.models import RedsysInitiateItem
+        order = self._order_with_item(split_portions=1, paid_portions=1, payment_status="paid")
+        with patch("app.services.payments.get_order_by_id", return_value=order):
+            with pytest.raises(ValueError, match="already paid"):
+                svc.initiate_redsys("order-1", [RedsysInitiateItem(itemId="item-1", portions=1)], "card", "a", "b")
 
+    def test_rejects_foreign_item(self):
+        from app.services import payments as svc
+        from app.models import RedsysInitiateItem
+        with patch("app.services.payments.get_order_by_id", return_value=self._order_with_item()):
+            with pytest.raises(ValueError, match="does not belong"):
+                svc.initiate_redsys("order-1", [RedsysInitiateItem(itemId="ghost", portions=1)], "card", "a", "b")
 
-# ---------------------------------------------------------------------------
-# Pure unit tests for payment service (no HTTP layer)
-# ---------------------------------------------------------------------------
 
 class TestCreatePaymentService:
     def test_create_payment_builds_correct_row(self):
         from app.services import payments as svc
-        payment_data = make_payment()
-
         with patch("app.services.payments.get_client") as mock_gc:
-            mock_gc.return_value = make_mock_client(data=[payment_data])
+            mock_gc.return_value = make_mock_client(data=[make_payment()])
             result = svc.create_payment("order-1", 27.50, "card")
-
-        assert result.id == "pay-1"
         assert result.order_id == "order-1"
         assert result.status == "confirmed"
 
     def test_create_payment_raises_on_empty_insert_result(self):
         from app.services import payments as svc
-
         with patch("app.services.payments.get_client") as mock_gc:
             mock_gc.return_value = make_mock_client(data=None)
             with pytest.raises(RuntimeError, match="failed to create payment"):

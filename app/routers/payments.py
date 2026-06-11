@@ -3,9 +3,10 @@ import traceback
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import require_feature
-from app.models import CreatePaymentBody, RedsysSignBody
+from app.models import CreatePaymentBody, RedsysInitiateBody
 from app.logging import log_event, LogFactory
 from app.services import activity as activity_svc
 from app.services import orders as order_svc
@@ -16,7 +17,7 @@ router = APIRouter()
 
 @router.post("/payments", status_code=201)
 @limiter.limit("20/minute")
-def create_payment(request: Request, body: CreatePaymentBody, _tenant_id: str = Depends(require_feature("payments"))):
+def create_payment(request: Request, body: CreatePaymentBody, _user_id: str = Depends(require_auth), _tenant_id: str = Depends(require_feature("payments"))):
     if not body.orderId or not body.amount or not body.method:
         return JSONResponse(
             status_code=400,
@@ -45,23 +46,30 @@ def create_payment(request: Request, body: CreatePaymentBody, _tenant_id: str = 
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
-@router.post("/payments/redsys-sign")
+@router.post("/payments/redsys-initiate")
 @limiter.limit("20/minute")
-def redsys_sign(request: Request, body: RedsysSignBody):
-    if not body.amount or not body.urlOk or not body.urlKo:
+def redsys_initiate(request: Request, body: RedsysInitiateBody):
+    """Server-authoritative Redsys initiation. The client sends orderId + the
+    items (+ portions) it wants to pay — NEVER an amount. The server computes the
+    amount from the DB, persists a pending payment keyed to the Redsys order
+    number, and returns the signed request. Confirmation happens only via the
+    Redsys S2S callback (the sole writer of payment_status='paid')."""
+    if not body.orderId or not body.items or not body.method:
         return JSONResponse(
             status_code=400,
-            content={"data": None, "error": "amount, urlOk and urlKo are required"},
+            content={"data": None, "error": "orderId, items and method are required"},
         )
     try:
-        result = svc.sign_redsys(body.amount, body.urlOk, body.urlKo)
+        result = svc.initiate_redsys(body.orderId, body.items, body.method, body.urlOk, body.urlKo)
         log_event(LogFactory.payment_event(
-            "redsys_sign_ok", "", body.amount, "redsys",
+            "redsys_initiated", body.orderId, 0, body.method,
         ))
-        return result.dict()
+        return result
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"data": None, "error": str(e)})
     except Exception as e:
         log_event(LogFactory.payment_event(
-            "redsys_sign_failed", "", body.amount, "redsys",
+            "redsys_initiate_failed", body.orderId, 0, body.method,
             error=str(e),
         ))
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return JSONResponse(status_code=500, content={"data": None, "error": "Internal server error"})

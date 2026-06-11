@@ -750,7 +750,7 @@ def _dispatch_tool(name: str, args: dict[str, Any], tenant_id: str | None = None
         
         order_ids = [o["id"] for o in orders_today]
         if order_ids:
-            payments_today = get_client().table("payments").select("amount,payment_method,status").in_("order_id", order_ids).eq("status", "completed").execute().data or []
+            payments_today = get_client().table("payments").select("amount,payment_method,status").in_("order_id", order_ids).eq("status", "confirmed").execute().data or []
         else:
             payments_today = []
         
