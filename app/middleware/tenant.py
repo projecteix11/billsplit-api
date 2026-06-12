@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from fastapi import Depends, HTTPException, Request
 
 from app.db.supabase import get_client, verify_token_full
+from app.services.guest_session import verify_guest_token, GuestTokenError
 
 _SLUG_CACHE: dict[str, tuple[str, float]] = {}
 _FEATURES_CACHE: dict[str, tuple[dict, float]] = {}
@@ -60,9 +61,10 @@ async def get_current_tenant(request: Request) -> str:
     Priority:
       1. JWT already verified by AuthMiddleware or require_auth → use state
       2. Bearer token in header → verify and extract tenant_id
-      3. X-Tenant-Slug header → slug lookup in DB
-      4. Origin/Referer header → parse slug → DB lookup
-      5. 404
+      3. X-Guest-Token (XM-6) → verified signed token's tenant claim (server-trusted)
+      4. X-Tenant-Slug header → slug lookup in DB (spoofable hint; being phased out)
+      5. Origin/Referer header → parse slug → DB lookup
+      6. 404
     """
     # 1. Already resolved (auth middleware ran for this route)
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -82,7 +84,23 @@ async def get_current_tenant(request: Request) -> str:
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # 3. X-Tenant-Slug header → resolve slug against DB
+    # 3. Guest session token (XM-6) → tenant from a server-signed claim. Trusted
+    #    above X-Tenant-Slug because the tenant was derived from the scanned
+    #    table at issue time, not supplied by the client. An invalid/expired
+    #    token is ignored here (falls through); enforcement is a separate step.
+    guest_token = request.headers.get("X-Guest-Token")
+    if guest_token:
+        try:
+            claims = verify_guest_token(guest_token)
+            tenant_id = str(claims.get("tid", ""))
+            if tenant_id:
+                request.state.tenant_id = tenant_id
+                request.state.guest_claims = claims
+                return tenant_id
+        except GuestTokenError:
+            pass
+
+    # 4. X-Tenant-Slug header → resolve slug against DB
     tenant_slug_header = request.headers.get("X-Tenant-Slug")
     if tenant_slug_header:
         tenant_id = _resolve_slug(tenant_slug_header)

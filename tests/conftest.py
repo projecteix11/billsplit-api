@@ -28,6 +28,7 @@ if "axiom_py" not in sys.modules:
 # Provide dummy env vars BEFORE importing the app so supabase.init() doesn't fail.
 os.environ.setdefault("SUPABASE_URL", "http://test.supabase.local")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+os.environ.setdefault("GUEST_SESSION_SECRET", "test-guest-session-secret")
 
 from fastapi.testclient import TestClient
 from app.middleware.tenant import get_current_tenant

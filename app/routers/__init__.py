@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 
-from app.routers import activity, chat, daily_menus, dishes, generate_description, me, notifications, orders, order_items, payments, reservations, staff, tenants
+from app.routers import activity, chat, daily_menus, dishes, generate_description, guest, me, notifications, orders, order_items, payments, reservations, staff, tenants
 
 
 def register(app: FastAPI) -> None:
     app.include_router(me.router, tags=["auth"])
+    app.include_router(guest.router, tags=["auth"])
     app.include_router(activity.router, tags=["activity"])
     app.include_router(chat.router, tags=["chat"])
     app.include_router(daily_menus.router, tags=["daily menus"])
