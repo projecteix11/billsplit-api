@@ -179,6 +179,16 @@ class TestUpdateKitchenStatus:
 class TestUpdatePaymentStatus:
     _valid_body = {"itemIds": ["item-1", "item-2"], "status": "paid"}
 
+    @pytest.fixture(autouse=True)
+    def _staff_auth(self, app):
+        """payment-status and payment-portions are staff-only now (XC-1): satisfy
+        require_auth for this class so the behavioural tests below still exercise
+        the handler. The unauthenticated-rejection case is covered in test_auth.py."""
+        from app.middleware.auth import require_auth
+        app.dependency_overrides[require_auth] = lambda: VALID_USER_ID
+        yield
+        app.dependency_overrides.pop(require_auth, None)
+
     @staticmethod
     def _ownership_rows(*item_ids: str) -> list:
         return [{"id": iid, "order": {"tenant_id": VALID_TENANT_ID}} for iid in item_ids]
