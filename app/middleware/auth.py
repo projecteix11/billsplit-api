@@ -1,9 +1,17 @@
+import os
+
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.db import supabase
 from app.logging import log_event, LogFactory
+from app.services.guest_session import verify_guest_token, GuestTokenError
+
+# XM-6 rollout switch. Grace period (default): customer mutations without a
+# known principal are allowed but logged, so token adoption can be monitored.
+# Flip to "true" to hard-fail (401) once the clients are confirmed sending tokens.
+ENFORCE_GUEST_TOKEN = os.getenv("ENFORCE_GUEST_TOKEN", "false").lower() == "true"
 
 PROTECTED_ROUTES = [
     ("GET", "/orders"),
@@ -65,6 +73,40 @@ async def auth_error_handler(_request: Request, exc: AuthError):
         status_code=401,
         content={"data": None, "error": exc.message},
     )
+
+
+def require_customer_principal(request: Request) -> None:
+    """Customer mutation guard (XM-6). The caller must be a known principal —
+    either staff (Supabase Bearer JWT) or a diner holding a valid guest session
+    token (X-Guest-Token). During the grace period, a request with neither is
+    allowed but logged so adoption can be tracked; set ENFORCE_GUEST_TOKEN=true
+    to hard-fail (401). Tenant resolution still happens in get_current_tenant;
+    this only asserts *who* is calling."""
+    # Staff path: a valid Supabase JWT.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            supabase.verify_token_full(auth_header[7:])
+            return
+        except Exception:
+            pass
+
+    # Diner path: a valid guest session token.
+    guest_token = request.headers.get("X-Guest-Token", "")
+    if guest_token:
+        try:
+            verify_guest_token(guest_token)
+            return
+        except GuestTokenError:
+            pass
+
+    # Neither — grace by default, hard-fail when enforcement is switched on.
+    log_event(LogFactory.auth_event(
+        "customer_mutation_no_principal",
+        metadata={"path": request.url.path, "method": request.method, "enforced": ENFORCE_GUEST_TOKEN},
+    ))
+    if ENFORCE_GUEST_TOKEN:
+        raise AuthError("A guest session token (or staff auth) is required")
 
 
 def require_auth(request: Request) -> str:

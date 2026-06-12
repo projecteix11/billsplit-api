@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.logging import log_event, LogFactory
-from app.middleware.auth import require_auth
+from app.middleware.auth import require_auth, require_customer_principal
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import get_current_tenant
 from app.models import CreateOrderBody, AddItemsBody
@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.post("/orders", status_code=201)
 @limiter.limit("20/minute")
-async def create_order(request: Request, body: CreateOrderBody, tenant_id: str = Depends(get_current_tenant)):
+async def create_order(request: Request, body: CreateOrderBody, tenant_id: str = Depends(get_current_tenant), _principal: None = Depends(require_customer_principal)):
     if not body.tableId or not body.tableNumber or not body.items:
         return JSONResponse(
             status_code=400,
@@ -70,7 +70,7 @@ def get_order_by_id(order_id: str):
 
 @router.post("/orders/{order_id}/items")
 @limiter.limit("20/minute")
-def add_items_to_order(request: Request, order_id: str, body: AddItemsBody):
+def add_items_to_order(request: Request, order_id: str, body: AddItemsBody, _principal: None = Depends(require_customer_principal)):
     if not body.items:
         return JSONResponse(status_code=400, content={"data": None, "error": "items[] is required"})
     try:

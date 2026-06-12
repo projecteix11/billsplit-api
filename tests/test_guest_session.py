@@ -138,3 +138,42 @@ class TestTenantFromGuestToken:
         # A bad token must raise GuestTokenError from verify, which the resolver swallows.
         with pytest.raises(gs.GuestTokenError):
             gs.verify_guest_token("garbage.token.here")
+
+
+# ---------------------------------------------------------------------------
+# require_customer_principal — grace-period guard on customer mutations (XM-6)
+# ---------------------------------------------------------------------------
+
+class TestCustomerPrincipalGuard:
+    def _req(self, headers=None):
+        class _Req:
+            pass
+        r = _Req()
+        r.headers = headers or {}
+        r.url = type("U", (), {"path": "/orders"})()
+        r.method = "POST"
+        return r
+
+    def test_grace_allows_when_no_principal(self, monkeypatch):
+        import app.middleware.auth as auth_mod
+        monkeypatch.setattr(auth_mod, "ENFORCE_GUEST_TOKEN", False)
+        # Grace: no token, no staff — must NOT raise (just logs).
+        assert auth_mod.require_customer_principal(self._req()) is None
+
+    def test_valid_guest_token_passes_even_when_enforced(self, monkeypatch):
+        import app.middleware.auth as auth_mod
+        monkeypatch.setattr(auth_mod, "ENFORCE_GUEST_TOKEN", True)
+        token, _ = gs.issue_guest_token("tenant-1", "table-9")
+        assert auth_mod.require_customer_principal(self._req({"X-Guest-Token": token})) is None
+
+    def test_enforce_rejects_when_no_principal(self, monkeypatch):
+        import app.middleware.auth as auth_mod
+        monkeypatch.setattr(auth_mod, "ENFORCE_GUEST_TOKEN", True)
+        with pytest.raises(auth_mod.AuthError):
+            auth_mod.require_customer_principal(self._req())
+
+    def test_staff_bearer_passes(self, monkeypatch):
+        import app.middleware.auth as auth_mod
+        monkeypatch.setattr(auth_mod, "ENFORCE_GUEST_TOKEN", True)
+        with patch("app.middleware.auth.supabase.verify_token_full", return_value=("u", "t", "staff")):
+            assert auth_mod.require_customer_principal(self._req({"Authorization": "Bearer staff-jwt"})) is None

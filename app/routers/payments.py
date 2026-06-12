@@ -3,7 +3,7 @@ import traceback
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from app.middleware.auth import require_auth
+from app.middleware.auth import require_auth, require_customer_principal
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import require_feature
 from app.models import CreatePaymentBody, RedsysInitiateBody
@@ -65,7 +65,7 @@ def get_redsys_payment(order_number: str):
 
 @router.post("/payments/redsys-initiate")
 @limiter.limit("20/minute")
-def redsys_initiate(request: Request, body: RedsysInitiateBody):
+def redsys_initiate(request: Request, body: RedsysInitiateBody, _principal: None = Depends(require_customer_principal)):
     """Server-authoritative Redsys initiation. The client sends orderId + the
     items (+ portions) it wants to pay — NEVER an amount. The server computes the
     amount from the DB, persists a pending payment keyed to the Redsys order
