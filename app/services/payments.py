@@ -123,6 +123,26 @@ def initiate_redsys(
     return _sign_via_edge(amount, order_number, url_ok, url_ko, method)
 
 
+def get_payment_by_redsys_order(order_number: str) -> Payment | None:
+    """Look up a payment by its Redsys order number — the opaque 12-digit handle
+    the client received at initiate. Used by the diner frontend after the S2S
+    callback confirms, to obtain the payment id for a Verifactu invoice request
+    (the client no longer creates the payment, so it can't know the id otherwise)."""
+    rows = (
+        get_client()
+        .table("payments")
+        .select("id, order_id, amount, tip_amount, total_charged, payment_method, status")
+        .eq("redsys_order_number", order_number)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return None
+    return Payment(**rows[0])
+
+
 def create_payment(order_id: str, amount: float, method: str) -> Payment:
     """Manual/cash payment recorded by authenticated staff. Online (Redsys)
     payments are confirmed only by the S2S callback, never here."""

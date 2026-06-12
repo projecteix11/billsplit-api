@@ -46,6 +46,23 @@ def create_payment(request: Request, body: CreatePaymentBody, _user_id: str = De
         return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
 
 
+@router.get("/payments/redsys/{order_number}")
+def get_redsys_payment(order_number: str):
+    """Public lookup of a payment by its Redsys order number. After the S2S
+    callback confirms, the diner frontend calls this to get the payment id (and
+    status) so it can offer a Verifactu invoice — the client no longer creates
+    the payment, so it can't learn the id any other way. The order number is an
+    opaque, server-generated 12-digit handle the client already holds; only
+    minimal, non-PII payment fields are returned."""
+    try:
+        payment = svc.get_payment_by_redsys_order(order_number)
+        if payment is None:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Payment not found"})
+        return {"data": payment.model_dump(), "error": None}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+
+
 @router.post("/payments/redsys-initiate")
 @limiter.limit("20/minute")
 def redsys_initiate(request: Request, body: RedsysInitiateBody):

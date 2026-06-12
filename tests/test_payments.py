@@ -175,6 +175,43 @@ class TestInitiateService:
                 svc.initiate_redsys("order-1", [RedsysInitiateItem(itemId="ghost", portions=1)], "card", "a", "b")
 
 
+# ---------------------------------------------------------------------------
+# GET /api/payments/redsys/{order_number}  (post-callback payment-id lookup)
+# ---------------------------------------------------------------------------
+
+class TestGetRedsysPayment:
+    def test_returns_payment_for_known_order_number(self, client: TestClient):
+        payment = make_payment(status="confirmed")
+        with patch("app.services.payments.get_client", return_value=make_mock_client(data=[payment])):
+            resp = client.get("/payments/redsys/123456789012")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["id"] == "pay-1"
+        assert data["status"] == "confirmed"
+
+    def test_returns_404_when_no_match(self, client: TestClient):
+        with patch("app.services.payments.get_client", return_value=make_mock_client(data=[])):
+            resp = client.get("/payments/redsys/000000000000")
+        assert resp.status_code == 404
+        assert resp.json()["data"] is None
+
+
+class TestGetRedsysPaymentService:
+    def test_looks_up_by_redsys_order_number(self):
+        from app.services import payments as svc
+        with patch("app.services.payments.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[make_payment()])
+            result = svc.get_payment_by_redsys_order("123456789012")
+        assert result is not None
+        assert result.id == "pay-1"
+
+    def test_returns_none_when_absent(self):
+        from app.services import payments as svc
+        with patch("app.services.payments.get_client") as mock_gc:
+            mock_gc.return_value = make_mock_client(data=[])
+            assert svc.get_payment_by_redsys_order("000000000000") is None
+
+
 class TestCreatePaymentService:
     def test_create_payment_builds_correct_row(self):
         from app.services import payments as svc
