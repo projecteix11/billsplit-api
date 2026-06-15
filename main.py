@@ -5,6 +5,7 @@ load_dotenv(".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -75,7 +76,21 @@ routers.register(app)
 @app.get("/health")
 @limiter.exempt
 def health():
+    # Cheap liveness: the process is up and serving.
     return {"status": "ok"}
+
+
+@app.get("/ready")
+@limiter.exempt
+def ready():
+    """Readiness probe (XM-7): confirms the API can actually reach the database
+    with a minimal round-trip. Returns 503 on failure so external monitors get a
+    truthful signal, unlike the always-ok liveness /health above."""
+    try:
+        supabase.get_client().table("tenants").select("id").limit(1).execute()
+        return {"status": "ready"}
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
 
 
 if __name__ == "__main__":
