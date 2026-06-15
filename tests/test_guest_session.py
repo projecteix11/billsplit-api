@@ -123,7 +123,7 @@ class TestTenantFromGuestToken:
             }
             # add_items requires only that tenant resolution succeeds; stub the service.
             with patch("app.services.orders.add_items_to_order", return_value=None), \
-                 patch("app.services.activity.get_order_context", return_value=None):
+                 patch("app.services.orders.get_client", return_value=make_mock_client(data=[order])):
                 resp = client.post(
                     "/orders/order-3/items",
                     json={"items": [{"dish_name": "X", "dish_price": 1.0, "quantity": 1}]},

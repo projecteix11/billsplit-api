@@ -18,6 +18,7 @@ from app.models import (
 )
 from app.services import dishes as svc
 from app.http_errors import internal_error
+from app.db.supabase import get_client
 
 router = APIRouter()
 
@@ -35,9 +36,9 @@ async def get_dishes(tenant_id: str = Depends(get_current_tenant)):
 
 
 @router.get("/dishes/{dish_id}")
-def get_dish(dish_id: str):
+def get_dish(dish_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
-        dish = svc.get_dish_by_id(dish_id)
+        dish = svc.get_dish_by_id(dish_id, tenant_id)
         if dish is None:
             return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
         return {"data": dish.model_dump(), "error": None}
@@ -60,7 +61,7 @@ async def create_dish(request: Request, body: CreateDishBody, _user_id: str = De
 def update_dish(request: Request, dish_id: str, body: UpdateDishBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
         svc.update_dish(dish_id, body, tenant_id)
-        dish = svc.get_dish_by_id(dish_id)
+        dish = svc.get_dish_by_id(dish_id, tenant_id)
         return {"data": dish.model_dump() if dish else None, "error": None}
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
@@ -104,9 +105,9 @@ async def create_category(request: Request, body: CreateCategoryBody, _user_id: 
 
 @router.patch("/categories/{category_id}")
 @limiter.limit("20/minute")
-def update_category(request: Request, category_id: str, body: UpdateCategoryBody, _user_id: str = Depends(require_auth)):
+def update_category(request: Request, category_id: str, body: UpdateCategoryBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.update_category(category_id, body.name, body.sort_order, body.requires_kitchen)
+        svc.update_category(category_id, body.name, body.sort_order, body.requires_kitchen, tenant_id)
         return {"data": None, "error": None}
     except Exception as e:
         return internal_error(e)
@@ -114,9 +115,9 @@ def update_category(request: Request, category_id: str, body: UpdateCategoryBody
 
 @router.delete("/categories/{category_id}")
 @limiter.limit("20/minute")
-def delete_category(request: Request, category_id: str, _user_id: str = Depends(require_auth)):
+def delete_category(request: Request, category_id: str, _user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
     try:
-        svc.delete_category(category_id)
+        svc.delete_category(category_id, tenant_id)
         return {"data": None, "error": None}
     except Exception as e:
         return internal_error(e)
@@ -193,8 +194,9 @@ def set_dish_allergens(
 
 
 @router.get("/dishes/{dish_id}/ingredients")
-def get_dish_ingredients(dish_id: str):
+def get_dish_ingredients(dish_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
+        svc._assert_dish_owner(dish_id, tenant_id)
         data = svc.get_dish_ingredients(dish_id)
         return {"data": [i.model_dump() for i in data], "error": None}
     except Exception as e:
@@ -258,8 +260,12 @@ def delete_dish_ingredient(
 
 
 @router.get("/tables/{table_id}/custom-dishes")
-def get_custom_dishes_for_table(table_id: str):
+def get_custom_dishes_for_table(table_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
+        # Assert table ownership to prevent IDOR
+        tables = get_client().table("restaurant_tables").select("tenant_id").eq("id", table_id).execute().data or []
+        if not tables or tables[0]["tenant_id"] != tenant_id:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Table not found"})
         data = svc.get_custom_dishes_for_table(table_id)
         return {"data": [d.model_dump() for d in data], "error": None}
     except Exception as e:

@@ -71,11 +71,17 @@ async def update_reservation(
     reservation_id: str,
     body: UpdateReservationBody,
     _user_id: str = Depends(require_auth),
+    tenant_id: str = Depends(require_feature("reservations")),
 ):
     patch = body.model_dump(exclude_none=True)
     if not patch:
         return JSONResponse(status_code=422, content={"data": None, "error": "No valid fields to update"})
     try:
+        # Verify ownership first to prevent IDOR
+        existing = get_client().table("reservations").select("tenant_id").eq("id", reservation_id).execute().data
+        if not existing or existing[0]["tenant_id"] != tenant_id:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Reservation not found"})
+        
         get_client().table("reservations").update(patch).eq("id", reservation_id).execute()
         return {"data": None, "error": None}
     except Exception as e:

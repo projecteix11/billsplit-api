@@ -59,10 +59,10 @@ async def create_order(request: Request, body: CreateOrderBody, tenant_id: str =
 
 
 @router.get("/orders/{order_id}")
-def get_order_by_id(order_id: str):
+def get_order_by_id(order_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
         order = svc.get_order_by_id(order_id)
-        if order is None:
+        if order is None or order.tenant_id != tenant_id:
             return JSONResponse(status_code=404, content={"data": None, "error": "Order not found"})
         return {"data": order.model_dump(), "error": None}
     except Exception as e:
@@ -71,11 +71,14 @@ def get_order_by_id(order_id: str):
 
 @router.post("/orders/{order_id}/items")
 @limiter.limit("20/minute")
-def add_items_to_order(request: Request, order_id: str, body: AddItemsBody, _principal: None = Depends(require_customer_principal)):
+def add_items_to_order(request: Request, order_id: str, body: AddItemsBody, tenant_id: str = Depends(get_current_tenant), _principal: None = Depends(require_customer_principal)):
     if not body.items:
         return JSONResponse(status_code=400, content={"data": None, "error": "items[] is required"})
     try:
-        order_ctx = activity_svc.get_order_context(order_id)
+        rows = svc.get_client().table("orders").select("id,tenant_id,table_id,table_number,status,total").eq("id", order_id).limit(1).execute().data or []
+        order_ctx = rows[0] if rows else None
+        if not order_ctx or order_ctx["tenant_id"] != tenant_id:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Order not found"})
         svc.add_items_to_order(order_id, body.items)
         log_event(LogFactory.order_lifecycle(
             "items_added", order_id,
@@ -114,20 +117,27 @@ def close_order(request: Request, order_id: str, tenant_id: str = Depends(get_cu
 
 
 @router.get("/tables/{table_id}")
-def get_table(table_id: str):
+def get_table(table_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
-        rows = get_client().table("restaurant_tables").select("id,number,status,active_order_id").eq("id", table_id).execute().data or []
-        if not rows:
+        rows = svc.get_client().table("restaurant_tables").select("id,number,status,active_order_id,tenant_id").eq("id", table_id).execute().data or []
+        if not rows or rows[0]["tenant_id"] != tenant_id:
             return JSONResponse(status_code=404, content={"data": None, "error": "Table not found"})
+        del rows[0]["tenant_id"]
         return {"data": rows[0], "error": None}
     except Exception as e:
         return internal_error(e)
 
 
 @router.get("/tables/{table_id}/open-order")
-def get_open_order_for_table(table_id: str):
+def get_open_order_for_table(table_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
+        # Verify the table belongs to the tenant first to prevent IDOR
+        tables = svc.get_client().table("restaurant_tables").select("tenant_id").eq("id", table_id).execute().data or []
+        if not tables or tables[0]["tenant_id"] != tenant_id:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Table not found"})
         order = svc.get_open_order_for_table(table_id)
+        if order and order.tenant_id != tenant_id:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Order not found"})
         return {"data": order.model_dump() if order else None, "error": None}
     except Exception as e:
         return internal_error(e)

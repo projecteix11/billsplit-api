@@ -58,15 +58,11 @@ def get_all_dishes(tenant_id: str) -> list[DishFull]:
     return [_parse_dish_full(row) for row in rows]
 
 
-def get_dish_by_id(dish_id: str) -> DishFull | None:
-    rows = (
-        get_client().table("dishes")
-        .select(_DISH_SELECT)
-        .eq("id", dish_id)
-        .limit(1)
-        .execute()
-        .data or []
-    )
+def get_dish_by_id(dish_id: str, tenant_id: str | None = None) -> DishFull | None:
+    query = get_client().table("dishes").select(_DISH_SELECT).eq("id", dish_id)
+    if tenant_id:
+        query = query.eq("tenant_id", tenant_id)
+    rows = query.limit(1).execute().data or []
     if not rows:
         return None
     return _parse_dish_full(rows[0])
@@ -81,7 +77,7 @@ def create_dish(body: CreateDishBody, tenant_id: str) -> DishFull:
     inserted = get_client().table("dishes").insert(data).execute().data
     if not inserted:
         raise RuntimeError("failed to create dish")
-    dish = get_dish_by_id(inserted[0]["id"])
+    dish = get_dish_by_id(inserted[0]["id"], tenant_id)
     if not dish:
         raise RuntimeError("failed to read created dish")
     return dish
@@ -145,7 +141,22 @@ def create_category(name: str, sort_order: int, tenant_id: str, requires_kitchen
     return DishCategory(**{k: inserted[0][k] for k in ("id", "name", "sort_order", "requires_kitchen")})
 
 
-def update_category(category_id: str, name: str | None, sort_order: int | None, requires_kitchen: bool | None = None) -> None:
+def _assert_category_owner(category_id: str, tenant_id: str) -> None:
+    rows = (
+        get_client().table("categories")
+        .select("id")
+        .eq("id", category_id)
+        .eq("tenant_id", tenant_id)
+        .limit(1)
+        .execute()
+        .data or []
+    )
+    if not rows:
+        raise ValueError(f"category {category_id} not found")
+
+
+def update_category(category_id: str, name: str | None, sort_order: int | None, requires_kitchen: bool | None, tenant_id: str) -> None:
+    _assert_category_owner(category_id, tenant_id)
     data: dict = {}
     if name is not None:
         data["name"] = name
@@ -157,7 +168,8 @@ def update_category(category_id: str, name: str | None, sort_order: int | None, 
         get_client().table("categories").update(data).eq("id", category_id).execute()
 
 
-def delete_category(category_id: str) -> None:
+def delete_category(category_id: str, tenant_id: str) -> None:
+    _assert_category_owner(category_id, tenant_id)
     get_client().table("categories").update({"is_active": False}).eq("id", category_id).execute()
 
 

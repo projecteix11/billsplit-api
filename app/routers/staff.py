@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
+from app.middleware.tenant import get_current_tenant
 from app.models import CreateStaffBody, DeleteStaffBody
 from app.services import staff as svc
 from app.logging.client import log_event
@@ -14,7 +15,9 @@ router = APIRouter()
 
 @router.post("/staff", status_code=201)
 @limiter.limit("10/minute")
-def create_staff(request: Request, body: CreateStaffBody, user_id: str = Depends(require_auth)):
+def create_staff(request: Request, body: CreateStaffBody, user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
+    if body.tenantId != tenant_id:
+        return JSONResponse(status_code=403, content={"data": None, "error": "Access denied: tenant mismatch"})
     try:
         result = svc.create_staff_user(
             email=body.email,
@@ -45,7 +48,9 @@ def create_staff(request: Request, body: CreateStaffBody, user_id: str = Depends
 
 @router.delete("/staff/{staff_user_id}", status_code=200)
 @limiter.limit("10/minute")
-def delete_staff(request: Request, staff_user_id: str, body: DeleteStaffBody, user_id: str = Depends(require_auth)):
+def delete_staff(request: Request, staff_user_id: str, body: DeleteStaffBody, user_id: str = Depends(require_auth), tenant_id: str = Depends(get_current_tenant)):
+    if body.tenantId != tenant_id:
+        return JSONResponse(status_code=403, content={"data": None, "error": "Access denied: tenant mismatch"})
     try:
         svc.delete_staff_user(staff_user_id, body.tenantId)
 

@@ -302,9 +302,13 @@ class TestAddItemsToOrder:
 
         mock_q.insert = track_insert
         mock_q.execute.side_effect = [
-            MagicMock(data=None),
-            MagicMock(data=[order]),
-            MagicMock(data=None),
+            MagicMock(data=[order]),  # 1. Order tenant check in router
+            MagicMock(data=None),     # 2. Category lookup in _build_and_insert_items
+            MagicMock(data=None),     # 3. Insert order items
+            MagicMock(data=[order]),  # 4. get_order_by_id in add_items_to_order
+            MagicMock(data=None),     # 5. Table label in _attach_table_label
+            MagicMock(data=None),     # 6. Update table status
+            MagicMock(data=None),     # 7. Update order total
         ]
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
@@ -325,9 +329,13 @@ class TestAddItemsToOrder:
 
         mock_q.insert = track_insert
         mock_q.execute.side_effect = [
-            MagicMock(data=None),
-            MagicMock(data=[order]),
-            MagicMock(data=None),
+            MagicMock(data=[order]),  # 1. Order tenant check in router
+            MagicMock(data=None),     # 2. Category lookup in _build_and_insert_items
+            MagicMock(data=None),     # 3. Insert order items
+            MagicMock(data=[order]),  # 4. get_order_by_id in add_items_to_order
+            MagicMock(data=None),     # 5. Table label in _attach_table_label
+            MagicMock(data=None),     # 6. Update table status
+            MagicMock(data=None),     # 7. Update order total
         ]
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
@@ -412,8 +420,13 @@ class TestGetOpenOrderForTable:
         assert body["error"] is None
 
     def test_returns_200_with_null_data_when_no_open_order(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"tenant_id": VALID_TENANT_ID}]),  # table tenant check
+            MagicMock(data=[]),                                # no open order
+        ]
         with patch("app.services.orders.get_client") as mock_gc:
-            mock_gc.return_value = make_mock_client(data=[])
+            mock_gc.return_value = mock_q
             resp = client.get("/tables/table-1/open-order")
 
         assert resp.status_code == 200

@@ -88,8 +88,11 @@ def get_all_daily_menus(tenant_id: str) -> list[DailyMenu]:
     return _hydrate_menus(rows)
 
 
-def get_daily_menu_by_id(menu_id: str) -> DailyMenu | None:
-    rows = get_client().table("daily_menus").select(_MENU_SELECT).eq("id", menu_id).limit(1).execute().data or []
+def get_daily_menu_by_id(menu_id: str, tenant_id: str | None = None) -> DailyMenu | None:
+    query = get_client().table("daily_menus").select(_MENU_SELECT).eq("id", menu_id)
+    if tenant_id:
+        query = query.eq("tenant_id", tenant_id)
+    rows = query.limit(1).execute().data or []
     menus = _hydrate_menus(rows)
     return menus[0] if menus else None
 
@@ -100,7 +103,7 @@ def create_daily_menu(body: CreateDailyMenuBody, tenant_id: str) -> DailyMenu:
     inserted = get_client().table("daily_menus").insert(data).execute().data
     if not inserted:
         raise RuntimeError("failed to create daily menu")
-    menu = get_daily_menu_by_id(inserted[0]["id"])
+    menu = get_daily_menu_by_id(inserted[0]["id"], tenant_id)
     if not menu:
         raise RuntimeError("failed to read created daily menu")
     return menu

@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 
 from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
-from app.middleware.tenant import require_feature
+from app.middleware.tenant import require_feature, get_current_tenant
 from app.models import (
     CreateDailyMenuBody,
     CreateDailyMenuItemBody,
@@ -34,9 +34,9 @@ async def get_daily_menus(all: bool = False, tenant_id: str = Depends(require_fe
 
 
 @router.get("/daily-menus/{menu_id}")
-def get_daily_menu(menu_id: str):
+def get_daily_menu(menu_id: str, tenant_id: str = Depends(get_current_tenant)):
     try:
-        menu = svc.get_daily_menu_by_id(menu_id)
+        menu = svc.get_daily_menu_by_id(menu_id, tenant_id)
         if menu is None:
             return JSONResponse(status_code=404, content={"data": None, "error": "Menu not found"})
         return {"data": menu.model_dump(), "error": None}
@@ -59,7 +59,7 @@ async def create_daily_menu(request: Request, body: CreateDailyMenuBody, _user_i
 def update_daily_menu(request: Request, menu_id: str, body: UpdateDailyMenuBody, _user_id: str = Depends(require_auth), tenant_id: str = Depends(require_feature("daily_menus"))):
     try:
         svc.update_daily_menu(menu_id, body, tenant_id)
-        menu = svc.get_daily_menu_by_id(menu_id)
+        menu = svc.get_daily_menu_by_id(menu_id, tenant_id)
         return {"data": menu.model_dump() if menu else None, "error": None}
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu not found"})
