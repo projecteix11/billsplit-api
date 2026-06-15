@@ -227,3 +227,24 @@ class TestCreatePaymentService:
             mock_gc.return_value = make_mock_client(data=None)
             with pytest.raises(RuntimeError, match="failed to create payment"):
                 svc.create_payment("order-1", 10.0, "cash")
+
+
+class TestVerifyRedsysSignature:
+    def test_verifies_signature_with_url_safe_base64(self):
+        from app.services import payments as svc
+        import json
+        import base64
+        params_dict = {"Ds_Order": "123456789012", "Ds_Response": "0000"}
+        params_json = json.dumps(params_dict)
+        standard_params = base64.b64encode(params_json.encode("utf-8")).decode("utf-8")
+        
+        order_number = "123456789012"
+        expected_sig = svc._compute_redsys_signature(standard_params, order_number)
+        
+        # Force a URL-safe version of the signature to verify normalization works
+        url_safe_sig = expected_sig.replace("+", "-").replace("/", "_")
+        
+        decoded = svc.verify_redsys_signature(standard_params, url_safe_sig)
+        assert decoded["Ds_Order"] == order_number
+        assert decoded["Ds_Response"] == "0000"
+

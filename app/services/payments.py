@@ -92,10 +92,11 @@ def verify_redsys_signature(ds_params: str, ds_signature: str) -> dict:
     Raises:
         ValueError: if the signature is invalid or the response code indicates failure.
     """
-    # Decode merchant parameters
+    # Decode merchant parameters (handling URL-safe base64 replacements)
     try:
+        normalized_params = ds_params.replace("-", "+").replace("_", "/")
         # Redsys sometimes sends padded, sometimes not — add padding just in case
-        padded = ds_params + "=" * (-len(ds_params) % 4)
+        padded = normalized_params + "=" * (-len(normalized_params) % 4)
         decoded = json.loads(base64.b64decode(padded))
     except Exception as exc:
         raise ValueError(f"cannot decode Ds_MerchantParameters: {exc}") from exc
@@ -106,10 +107,13 @@ def verify_redsys_signature(ds_params: str, ds_signature: str) -> dict:
 
     expected = _compute_redsys_signature(ds_params, order_number)
 
+    # Normalize ds_signature from URL-safe base64 if needed
+    normalized_sig = ds_signature.replace("-", "+").replace("_", "/")
+
     # Constant-time comparison to prevent timing attacks
     if not hmac.compare_digest(
         expected.encode("ascii"),
-        ds_signature.encode("ascii"),
+        normalized_sig.encode("ascii"),
     ):
         raise ValueError("Redsys signature mismatch — possible tampering")
 
