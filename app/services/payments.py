@@ -143,9 +143,28 @@ def get_payment_by_redsys_order(order_number: str) -> Payment | None:
     return Payment(**rows[0])
 
 
-def create_payment(order_id: str, amount: float, method: str) -> Payment:
+def create_payment(
+    order_id: str,
+    amount: float,
+    method: str,
+    covered_items: Optional[list[RedsysInitiateItem]] = None,
+) -> Payment:
     """Manual/cash payment recorded by authenticated staff. Online (Redsys)
     payments are confirmed only by the S2S callback, never here."""
+    covered = []
+    if covered_items:
+        order = get_order_by_id(order_id)
+        if order:
+            by_id = {i.id: i for i in order.items}
+            for sel in covered_items:
+                item = by_id.get(sel.itemId)
+                if item:
+                    remaining = item.split_portions - item.paid_portions
+                    portions = max(1, sel.portions)
+                    if portions > remaining:
+                        portions = remaining
+                    covered.append({"item_id": item.id, "portions": portions})
+
     row = {
         "order_id": order_id,
         "amount": amount,
@@ -154,6 +173,8 @@ def create_payment(order_id: str, amount: float, method: str) -> Payment:
         "payment_method": method,
         "status": "confirmed",
     }
+    if covered:
+        row["covered_items"] = covered
 
     inserted = get_client().table("payments").insert(row).execute().data
     if not inserted:

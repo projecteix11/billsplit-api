@@ -289,6 +289,7 @@ class CreatePaymentBody(BaseModel):
     orderId: str
     amount: float
     method: str
+    coveredItems: Optional[list[RedsysInitiateItem]] = None
 
 
 class ActivityEvent(BaseModel):

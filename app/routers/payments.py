@@ -25,7 +25,7 @@ def create_payment(request: Request, body: CreatePaymentBody, _user_id: str = De
             content={"data": None, "error": "orderId, amount and method are required"},
         )
     try:
-        payment = svc.create_payment(body.orderId, body.amount, body.method)
+        payment = svc.create_payment(body.orderId, body.amount, body.method, body.coveredItems)
         log_event(LogFactory.payment_event(
             "payment_created", body.orderId, body.amount, body.method,
         ))
