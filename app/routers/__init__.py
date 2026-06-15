@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import activity, chat, daily_menus, dishes, generate_description, guest, me, notifications, orders, order_items, payments, reservations, staff, tenants
+from app.routers import activity, chat, daily_menus, dishes, generate_description, guest, me, notifications, orders, order_items, payments, reservations, staff, tenants, verifactu
 
 
 def register(app: FastAPI) -> None:
@@ -18,3 +18,4 @@ def register(app: FastAPI) -> None:
     app.include_router(reservations.router, tags=["reservations"])
     app.include_router(staff.router, tags=["staff"])
     app.include_router(tenants.router, tags=["tenants"])
+    app.include_router(verifactu.router, tags=["payments"])
