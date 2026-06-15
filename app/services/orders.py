@@ -475,8 +475,8 @@ def _resolve_ingredient_customizations(
         cust = item.customization
         if not cust or (not cust.get("added_ingredients") and not cust.get("removed_ingredients")):
             # No customization — use server-side base price, unless dish
-            # is variable-price (trust frontend price)
-            if dish_variable_price.get(item.dish_id, False):
+            # is variable-price or it's a menu item (trust frontend price)
+            if dish_variable_price.get(item.dish_id, False) or (cust and cust.get("menu_group")):
                 resolved_prices[idx] = item.dish_price
             else:
                 resolved_prices[idx] = base_price
@@ -545,7 +545,10 @@ def _resolve_ingredient_customizations(
                 "action": "removed",
             })
 
-        resolved_prices[idx] = _round2(base_price + extra_total)
+        if cust and cust.get("menu_group"):
+            resolved_prices[idx] = item.dish_price
+        else:
+            resolved_prices[idx] = _round2(base_price + extra_total)
         if item_ing_rows:
             ingredient_rows[idx] = item_ing_rows
 
