@@ -86,3 +86,29 @@ class TestLimiterConfiguration:
 
     def test_app_limiter_is_in_state_when_enabled(self, app):
         assert hasattr(app.state, "limiter")
+
+
+class TestClientIpKey:
+    """M6: the limiter must key on the real client IP (first X-Forwarded-For hop)
+    behind a proxy, not the proxy's peer address."""
+
+    def _req(self, headers: dict, peer: str = "10.0.0.1") -> MagicMock:
+        request = MagicMock()
+        request.headers = headers
+        request.client = MagicMock(host=peer)
+        return request
+
+    def test_uses_first_xff_hop(self):
+        from app.middleware.rate_limit import _client_ip
+        req = self._req({"x-forwarded-for": "203.0.113.5, 70.41.3.18, 10.0.0.1"})
+        assert _client_ip(req) == "203.0.113.5"
+
+    def test_distinct_clients_get_distinct_keys(self):
+        from app.middleware.rate_limit import _client_ip
+        a = _client_ip(self._req({"x-forwarded-for": "203.0.113.5"}))
+        b = _client_ip(self._req({"x-forwarded-for": "198.51.100.9"}))
+        assert a != b
+
+    def test_falls_back_to_peer_without_header(self):
+        from app.middleware.rate_limit import _client_ip
+        assert _client_ip(self._req({}, peer="10.0.0.1")) == "10.0.0.1"
