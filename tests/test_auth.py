@@ -79,9 +79,8 @@ class TestAuthOnKitchenStatus:
         mock_q = make_mock_client()
         from unittest.mock import MagicMock
         mock_q.execute.side_effect = [
-            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
-            MagicMock(data=None),
-        ]
+            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),  # _assert_item_owner
+        ] + [MagicMock(data=None)] * 10  # update + _sync get_order_by_id (None -> no-op)
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.get_client") as mock_gc:
                 mock_gc.return_value = mock_q

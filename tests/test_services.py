@@ -195,13 +195,7 @@ class TestCreateOrderService:
 
         order_row = make_order(subtotal=20.0, tax_amount=2.0, total=22.0)
 
-        mock_q = make_mock_client()
-        # First execute returns the inserted order, subsequent ones return []
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order_row]),  # orders insert
-            MagicMock(data=None),         # restaurant_tables update
-            MagicMock(data=None),         # order_items insert
-        ]
+        mock_q = make_mock_client(data=[order_row])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             result = svc.create_order("table-1", 5, items)
@@ -228,20 +222,13 @@ class TestCreateOrderService:
 
         captured_inserts = []
 
-        mock_q = make_mock_client()
-
-        original_insert = mock_q.insert
+        mock_q = make_mock_client(data=[order_row])
 
         def track_insert(body):
             captured_inserts.append(body)
             return mock_q
 
         mock_q.insert = track_insert
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order_row]),  # orders insert
-            MagicMock(data=None),         # restaurant_tables update
-            MagicMock(data=None),         # order_items insert
-        ]
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             svc.create_order("t-1", 1, items)
@@ -265,15 +252,9 @@ class TestCloseOrderService:
         from app.services import orders as svc
         order = make_order(id="order-uuid")
 
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),  # get_order_by_id (select)
-            MagicMock(data=None),     # orders update
-            MagicMock(data=None),     # restaurant_tables update
-        ]
+        mock_q = make_mock_client(data=[order])
 
         updated_bodies = []
-        original_update = mock_q.update
 
         def track_update(body):
             updated_bodies.append(body)
@@ -301,13 +282,7 @@ class TestMaybeCloseOrder:
         item = make_order_item(payment_status="paid", kitchen_status="delivered")
         order = make_order(items=[item])
 
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),  # get_order_by_id inside _maybe_close_order
-            MagicMock(data=[order]),  # get_order_by_id inside close_order
-            MagicMock(data=None),     # orders update
-            MagicMock(data=None),     # restaurant_tables update
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             with patch("app.services.dishes.get_client") as mock_dish_gc:
@@ -348,13 +323,7 @@ class TestMaybeCloseOrder:
         item = make_order_item(payment_status="paid", kitchen_status=None)
         order = make_order(items=[item])
 
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),
-            MagicMock(data=[order]),
-            MagicMock(data=None),
-            MagicMock(data=None),
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             with patch("app.services.dishes.get_client") as mock_dish_gc:
@@ -390,11 +359,7 @@ class TestAutoCloseOrdersForItems:
         mock_q = make_mock_client()
         mock_q.execute.side_effect = [
             MagicMock(data=[{"order_id": "order-1"}, {"order_id": "order-1"}, {"order_id": "order-1"}]),
-            MagicMock(data=[order]),   # _maybe_close_order: get_order_by_id
-            MagicMock(data=[order]),   # close_order: get_order_by_id
-            MagicMock(data=None),      # orders update
-            MagicMock(data=None),      # tables update
-        ]
+        ] + [MagicMock(data=[order])] * 12  # get_order_by_id (+ table-label) and the close updates
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             with patch("app.services.dishes.get_client") as mock_dish_gc:
@@ -492,9 +457,8 @@ class TestUpdateItemKitchenStatus:
 
         mock_q = make_mock_client()
         mock_q.execute.side_effect = [
-            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),
-            MagicMock(data=None),
-        ]
+            MagicMock(data=[{"order_id": "order-1", "order": {"tenant_id": VALID_TENANT_ID}}]),  # _assert_item_owner
+        ] + [MagicMock(data=None)] * 10  # update + _sync get_order_by_id (None -> sync no-ops)
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             svc.update_item_kitchen_status("item-xyz", "ready", VALID_TENANT_ID)

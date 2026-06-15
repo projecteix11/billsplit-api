@@ -35,9 +35,8 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_returns_200_with_valid_auth(self, client: TestClient):
         mock_q = make_mock_client()
         mock_q.execute.side_effect = [
-            MagicMock(data=_owner_row()),
-            MagicMock(data=None),
-        ]
+            MagicMock(data=_owner_row()),  # _assert_item_owner
+        ] + [MagicMock(data=None)] * 10  # update + _sync get_order_by_id (None -> no-op)
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.get_client") as mock_gc:
                 mock_gc.return_value = mock_q
@@ -52,9 +51,8 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_returns_null_data_envelope(self, client: TestClient):
         mock_q = make_mock_client()
         mock_q.execute.side_effect = [
-            MagicMock(data=_owner_row()),
-            MagicMock(data=None),
-        ]
+            MagicMock(data=_owner_row()),  # _assert_item_owner
+        ] + [MagicMock(data=None)] * 10  # update + _sync get_order_by_id (None -> no-op)
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.get_client") as mock_gc:
                 mock_gc.return_value = mock_q
@@ -94,9 +92,8 @@ class TestUpdateKitchenStatus:
     def test_update_kitchen_status_accepts_all_valid_statuses(self, client: TestClient, status: str):
         mock_q = make_mock_client()
         mock_q.execute.side_effect = [
-            MagicMock(data=_owner_row()),
-            MagicMock(data=None),
-        ]
+            MagicMock(data=_owner_row()),  # _assert_item_owner
+        ] + [MagicMock(data=None)] * 10  # update + _sync get_order_by_id (None -> no-op)
         with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
             with patch("app.services.orders.get_client") as mock_gc:
                 mock_gc.return_value = mock_q

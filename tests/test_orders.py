@@ -41,12 +41,7 @@ class TestCreateOrder:
 
     def test_create_order_returns_201_on_success(self, client: TestClient):
         order = make_order()
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),  # orders insert
-            MagicMock(data=None),     # restaurant_tables update
-            MagicMock(data=None),     # order_items insert
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             resp = client.post("/orders", json=self._valid_body)
@@ -55,12 +50,7 @@ class TestCreateOrder:
 
     def test_create_order_returns_data_envelope(self, client: TestClient):
         order = make_order()
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),
-            MagicMock(data=None),
-            MagicMock(data=None),
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             resp = client.post("/orders", json=self._valid_body)
@@ -71,12 +61,7 @@ class TestCreateOrder:
 
     def test_create_order_returns_order_fields(self, client: TestClient):
         order = make_order()
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),
-            MagicMock(data=None),
-            MagicMock(data=None),
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             resp = client.post("/orders", json=self._valid_body)
@@ -89,12 +74,7 @@ class TestCreateOrder:
 
     def test_create_order_calculates_tax(self, client: TestClient):
         order = make_order(subtotal=25.0, tax_amount=2.5, total=27.5)
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),
-            MagicMock(data=None),
-            MagicMock(data=None),
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             resp = client.post("/orders", json=self._valid_body)
@@ -271,12 +251,7 @@ class TestAddItemsToOrder:
 
     def test_add_items_returns_200(self, client: TestClient):
         order = make_order(items=[make_order_item()])
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=None),    # order_items insert
-            MagicMock(data=[order]), # get_order_by_id for recalculate
-            MagicMock(data=None),    # orders update
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             resp = client.post("/orders/order-1/items", json=self._valid_body)
@@ -285,12 +260,7 @@ class TestAddItemsToOrder:
 
     def test_add_items_returns_null_data_envelope(self, client: TestClient):
         order = make_order(items=[make_order_item()])
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=None),
-            MagicMock(data=[order]),
-            MagicMock(data=None),
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             resp = client.post("/orders/order-1/items", json=self._valid_body)
@@ -374,12 +344,7 @@ class TestAddItemsToOrder:
 class TestCloseOrder:
     def test_close_order_returns_200(self, client: TestClient):
         order = make_order()
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),  # get_order_by_id
-            MagicMock(data=None),     # orders update
-            MagicMock(data=None),     # restaurant_tables update
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             with patch("app.services.dishes.get_client") as mock_dish_gc:
@@ -390,12 +355,7 @@ class TestCloseOrder:
 
     def test_close_order_returns_null_data_envelope(self, client: TestClient):
         order = make_order()
-        mock_q = make_mock_client()
-        mock_q.execute.side_effect = [
-            MagicMock(data=[order]),
-            MagicMock(data=None),
-            MagicMock(data=None),
-        ]
+        mock_q = make_mock_client(data=[order])
         with patch("app.services.orders.get_client") as mock_gc:
             mock_gc.return_value = mock_q
             with patch("app.services.dishes.get_client") as mock_dish_gc:
