@@ -5,6 +5,7 @@ supabase>=2.0.0
 httpx>=0.28.1
 axiom-py==0.10.0
 slowapi==0.1.9
+python-multipart>=0.0.9
 
 # Test dependencies
 pytest==9.0.2

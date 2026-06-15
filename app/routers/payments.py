@@ -1,6 +1,6 @@
 import traceback
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse
 
 from app.middleware.auth import require_auth, require_customer_principal
@@ -91,3 +91,70 @@ def redsys_initiate(request: Request, body: RedsysInitiateBody, _principal: None
             error=str(e),
         ))
         return JSONResponse(status_code=500, content={"data": None, "error": "Internal server error"})
+
+
+@router.post("/payments/redsys-notify")
+async def redsys_notify(
+    request: Request,
+    Ds_SignatureVersion: str = Form(default=""),
+    Ds_MerchantParameters: str = Form(default=""),
+    Ds_Signature: str = Form(default=""),
+):
+    """Redsys server-to-server (S2S) notification endpoint.
+
+    Redsys POSTs here (application/x-www-form-urlencoded) immediately after a
+    payment is authorised on their end.  We verify the HMAC_SHA256_V1 signature,
+    then confirm the payment and update order items.
+
+    Redsys expects an empty 200 OK response on success and considers any other
+    status a delivery failure (and retries).  We must NOT return a redirect here.
+
+    This endpoint is PUBLIC (no auth header from Redsys) but is protected by
+    the HMAC signature — forging a notification would require knowing the secret.
+    """
+    try:
+        if not Ds_MerchantParameters or not Ds_Signature:
+            # Try reading from raw body in case the form parser missed it
+            body_bytes = await request.body()
+            body_text = body_bytes.decode("utf-8", errors="replace")
+            log_event(LogFactory.payment_event(
+                "redsys_notify_missing_params", "", 0, "",
+                error=f"Missing form fields. Body: {body_text[:200]}",
+            ))
+            return JSONResponse(status_code=400, content={"error": "Missing Ds_MerchantParameters or Ds_Signature"})
+
+        # Verify signature and decode params
+        params = svc.verify_redsys_signature(Ds_MerchantParameters, Ds_Signature)
+
+        redsys_order_number = params.get("Ds_Order", "")
+        amount_cents = int(params.get("Ds_Amount", 0))
+
+        log_event(LogFactory.payment_event(
+            "redsys_notify_received", redsys_order_number, amount_cents / 100, "",
+        ))
+
+        svc.confirm_redsys_payment(redsys_order_number, amount_cents)
+
+        log_event(LogFactory.payment_event(
+            "redsys_notify_confirmed", redsys_order_number, amount_cents / 100, "",
+        ))
+
+        # Redsys requires an empty 200 OK
+        return JSONResponse(status_code=200, content={})
+
+    except ValueError as e:
+        log_event(LogFactory.payment_event(
+            "redsys_notify_rejected", "", 0, "",
+            error=str(e),
+        ))
+        # Return 200 to Redsys even on signature failure to avoid infinite retries;
+        # we log the rejection and it's auditable.
+        return JSONResponse(status_code=200, content={"error": str(e)})
+
+    except Exception as e:
+        log_event(LogFactory.payment_event(
+            "redsys_notify_error", "", 0, "",
+            error=str(e),
+        ))
+        # Return 200 so Redsys doesn't keep retrying on server errors
+        return JSONResponse(status_code=200, content={"error": "internal error"})

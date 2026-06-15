@@ -1,8 +1,20 @@
 from __future__ import annotations
+import base64
+import hashlib
+import hmac
+import json
 import os
 import secrets
+from datetime import datetime, timezone
 
 import httpx
+from cryptography.hazmat.primitives.ciphers import Cipher, modes
+from cryptography.hazmat.backends import default_backend
+try:
+    # cryptography >= 44.0 moved TripleDES to decrepit
+    from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
+except ImportError:
+    from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES  # type: ignore[no-redef]
 
 from app.db.supabase import get_client
 from app.models import Payment, RedsysInitiateItem
@@ -15,6 +27,9 @@ from app.services.orders import (
 # public.payments.payment_method allows: bizum, apple_pay, google_pay, card, cash.
 _VALID_METHODS = {"bizum", "apple_pay", "google_pay", "card", "cash"}
 
+# Redsys response codes that indicate a successful payment (0000–0099).
+_REDSYS_SUCCESS_CODES = set(range(0, 100))
+
 
 def _edge_function_url() -> str:
     base = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -25,10 +40,191 @@ def _service_key() -> str:
     return os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 
+def _redsys_secret() -> str:
+    """Return the shared Redsys 3DES/HMAC secret (same as used in redsys-sign edge function)."""
+    return os.getenv("REDSYS_SECRET", "sq7HjrUOBfKmC576ILgskD5srU870gJ7")
+
+
 def _generate_order_number() -> str:
     """12 numeric chars. Redsys requires the first 4 to be digits; all-numeric is
     safe. Collisions are guarded by the unique index on redsys_order_number."""
     return "".join(secrets.choice("0123456789") for _ in range(12))
+
+
+# ─── Redsys HMAC_SHA256_V1 signature helpers ──────────────────────────────────
+
+def _derive_redsys_key(secret: str, order_number: str) -> bytes:
+    """Derive a per-order 3DES key.  Mirrors the JS implementation in redsys-sign:
+    1. Base64-decode the merchant secret, take first 24 bytes (3DES key).
+    2. Zero-pad the order-number to the next 8-byte boundary.
+    3. Encrypt with 3DES-CBC (zero IV, no PKCS7 padding).
+    """
+    raw_key = base64.b64decode(secret)[:24]
+    l = ((len(order_number) + 7) // 8) * 8  # next 8-byte boundary
+    padded = order_number.ljust(l, "\x00")[:l].encode("ascii")
+
+    iv = b"\x00" * 8
+    cipher = Cipher(TripleDES(raw_key), modes.CBC(iv), backend=default_backend())
+    enc = cipher.encryptor()
+    # No PKCS7 padding — block is already a multiple of 8 bytes
+    encrypted = enc.update(padded) + enc.finalize()
+    return encrypted[:l]
+
+
+def _compute_redsys_signature(merchant_params_b64: str, order_number: str) -> str:
+    """Compute HMAC-SHA256 over the base64-encoded merchant params.
+    Returns the signature as a base64 string."""
+    key = _derive_redsys_key(_redsys_secret(), order_number)
+    sig = hmac.new(key, merchant_params_b64.encode("ascii"), hashlib.sha256).digest()
+    return base64.b64encode(sig).decode("ascii")
+
+
+def verify_redsys_signature(ds_params: str, ds_signature: str) -> dict:
+    """Validate a Redsys HMAC_SHA256_V1 S2S notification.
+
+    Args:
+        ds_params:    raw value of Ds_MerchantParameters (base64-encoded JSON).
+        ds_signature: raw value of Ds_Signature (base64-encoded HMAC).
+
+    Returns:
+        The decoded merchant-parameters dict on success.
+
+    Raises:
+        ValueError: if the signature is invalid or the response code indicates failure.
+    """
+    # Decode merchant parameters
+    try:
+        # Redsys sometimes sends padded, sometimes not — add padding just in case
+        padded = ds_params + "=" * (-len(ds_params) % 4)
+        decoded = json.loads(base64.b64decode(padded))
+    except Exception as exc:
+        raise ValueError(f"cannot decode Ds_MerchantParameters: {exc}") from exc
+
+    order_number = decoded.get("Ds_Order", "")
+    if not order_number:
+        raise ValueError("Ds_Order missing from merchant parameters")
+
+    expected = _compute_redsys_signature(ds_params, order_number)
+
+    # Constant-time comparison to prevent timing attacks
+    if not hmac.compare_digest(
+        expected.encode("ascii"),
+        ds_signature.encode("ascii"),
+    ):
+        raise ValueError("Redsys signature mismatch — possible tampering")
+
+    # Response code 0000-0099 → authorised; anything else → failure/rejection
+    raw_code = str(decoded.get("Ds_Response", "9999")).lstrip("0") or "0"
+    code = int(raw_code)
+    if code not in _REDSYS_SUCCESS_CODES:
+        raise ValueError(f"Redsys response code indicates failure: {decoded.get('Ds_Response')}")
+
+    return decoded
+
+
+def confirm_redsys_payment(redsys_order_number: str, amount_cents: int) -> None:
+    """Mark a pending Redsys payment as confirmed and update order items.
+
+    Called by the S2S Redsys notification endpoint after the signature has been
+    verified.  This is the SOLE writer of payment_status='paid' for online payments.
+
+    Steps:
+    1. Look up the pending payment row by its Redsys order number.
+    2. Mark payment as confirmed with the server-confirmed amount.
+    3. Apply covered_items -> increment paid_portions / set payment_status='paid'.
+    4. Update order.amount_paid.
+    5. Auto-close the order if all items are fully paid.
+    """
+    rows = (
+        get_client()
+        .table("payments")
+        .select("id, order_id, covered_items, status, amount")
+        .eq("redsys_order_number", redsys_order_number)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise ValueError(f"no payment found for redsys_order_number={redsys_order_number}")
+
+    payment = rows[0]
+    if payment["status"] == "confirmed":
+        # Idempotent — Redsys may send the callback more than once
+        return
+
+    amount_eur = _round2(amount_cents / 100)
+
+    # 1. Confirm the payment row
+    get_client().table("payments").update({
+        "status": "confirmed",
+        "amount": amount_eur,
+        "total_charged": amount_eur,
+    }).eq("id", payment["id"]).execute()
+
+    order_id = payment["order_id"]
+    covered_items: list[dict] = payment.get("covered_items") or []
+
+    if covered_items:
+        # 2. Update paid_portions / payment_status for each covered item
+        for ci in covered_items:
+            item_id = ci.get("item_id")
+            portions = max(1, int(ci.get("portions", 1)))
+            if not item_id:
+                continue
+
+            item_rows = (
+                get_client()
+                .table("order_items")
+                .select("id, split_portions, paid_portions, payment_status")
+                .eq("id", item_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not item_rows:
+                continue
+
+            item = item_rows[0]
+            split = max(1, int(item.get("split_portions") or 1))
+            already_paid = (
+                split if item.get("payment_status") == "paid"
+                else int(item.get("paid_portions") or 0)
+            )
+            new_paid = min(split, already_paid + portions)
+            new_status = "paid" if new_paid >= split else "unassigned"
+
+            get_client().table("order_items").update({
+                "paid_portions": new_paid,
+                "payment_status": new_status,
+            }).eq("id", item_id).execute()
+    else:
+        # Fallback: no covered_items -> mark all unpaid items as paid
+        get_client().table("order_items").update({
+            "payment_status": "paid",
+        }).eq("order_id", order_id).neq("payment_status", "paid").execute()
+
+    # 3. Update order amount_paid
+    all_confirmed = (
+        get_client()
+        .table("payments")
+        .select("amount")
+        .eq("order_id", order_id)
+        .eq("status", "confirmed")
+        .execute()
+        .data
+        or []
+    )
+    total_paid = _round2(sum(float(p["amount"]) for p in all_confirmed))
+    get_client().table("orders").update({
+        "amount_paid": total_paid,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", order_id).execute()
+
+    # 4. Auto-close order if fully paid
+    from app.services.orders import _maybe_close_order  # avoid circular import
+    _maybe_close_order(order_id)
 
 
 def _sign_via_edge(amount: float, order_number: str, url_ok: str, url_ko: str, pay_method: str) -> dict:
@@ -147,7 +343,7 @@ def create_payment(
     order_id: str,
     amount: float,
     method: str,
-    covered_items: Optional[list[RedsysInitiateItem]] = None,
+    covered_items=None,
 ) -> Payment:
     """Manual/cash payment recorded by authenticated staff. Online (Redsys)
     payments are confirmed only by the S2S callback, never here."""
