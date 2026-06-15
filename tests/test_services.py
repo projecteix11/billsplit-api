@@ -721,6 +721,46 @@ class TestResolveIngredientCustomizations:
             with pytest.raises(ValueError, match="not a default ingredient"):
                 _resolve_ingredient_customizations(items)
 
+    def test_menu_group_item_without_customization_uses_frontend_price(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=12.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "menu_group": {
+                    "menu_name": "Menu del dia",
+                    "group_id": "group-1",
+                    "base_price": 12.0
+                }
+            }
+        )]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = _make_resolve_mock()
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 12.0  # uses frontend price, not server-side base 10.0
+        assert rows == {}
+
+    def test_menu_group_item_with_customization_uses_frontend_price(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=13.50, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [
+                    {"ingredient_id": ING_EXTRA_1, "name": "Bacon", "extra_price": 1.50},
+                ],
+                "menu_group": {
+                    "menu_name": "Menu del dia",
+                    "group_id": "group-1",
+                    "base_price": 12.0
+                }
+            }
+        )]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = _make_resolve_mock()
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 13.50  # uses frontend price, which already includes supplement/extras
+        assert len(rows[0]) == 1
+        assert rows[0][0]["action"] == "added"
+
 
 # ---------------------------------------------------------------------------
 # Orders service – _build_and_insert_items with ingredients
