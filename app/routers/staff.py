@@ -7,6 +7,7 @@ from app.models import CreateStaffBody, DeleteStaffBody
 from app.services import staff as svc
 from app.logging.client import log_event
 from app.logging.factory import LogFactory
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ def create_staff(request: Request, body: CreateStaffBody, user_id: str = Depends
             user_id=user_id,
             metadata={"email": body.email, "error": str(e)},
         ))
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/staff/{staff_user_id}", status_code=200)
@@ -63,4 +64,4 @@ def delete_staff(request: Request, staff_user_id: str, body: DeleteStaffBody, us
             user_id=user_id,
             metadata={"deleted_user_id": staff_user_id, "error": str(e)},
         ))
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

@@ -6,6 +6,7 @@ from app.middleware.auth import require_auth
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import require_feature
 from app.db.supabase import get_client
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -48,7 +49,7 @@ async def create_reservation(
         }).execute().data or []
         return JSONResponse(status_code=201, content={"data": rows[0] if rows else None, "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/reservations")
@@ -60,7 +61,7 @@ async def list_reservations(
         rows = get_client().table("reservations").select("*").eq("tenant_id", tenant_id).order("date").order("time").execute().data or []
         return {"data": rows, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/reservations/{reservation_id}")
@@ -78,4 +79,4 @@ async def update_reservation(
         get_client().table("reservations").update(patch).eq("id", reservation_id).execute()
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

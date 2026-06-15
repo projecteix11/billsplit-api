@@ -6,6 +6,7 @@ from app.middleware.auth import require_customer_principal
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import get_current_tenant
 from app.services import verifactu as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -31,7 +32,7 @@ def get_config(request: Request, tenant_id: str = Depends(get_current_tenant)):
     try:
         return JSONResponse(status_code=200, content={"data": svc.get_config(tenant_id), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/verifactu/invoice")
@@ -55,7 +56,7 @@ def create_invoice(
         )
         return JSONResponse(status_code=200, content={"data": result, "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/verifactu/invoice/{invoice_id}/pdf")
@@ -71,4 +72,4 @@ def generate_pdf(
         result = svc.generate_pdf(tenant_id, invoice_id)
         return JSONResponse(status_code=200, content={"data": result, "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

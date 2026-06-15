@@ -81,7 +81,7 @@ class TestGetDishes:
         assert resp.status_code == 500
         body = resp.json()
         assert body["data"] is None
-        assert "supabase 503" in body["error"]
+        assert body["error"] == "Internal server error"  # C5: detail not leaked
 
     def test_get_dishes_error_response_has_correct_envelope(self, client: TestClient):
         mock_q = make_mock_client()
@@ -148,7 +148,7 @@ class TestGetCategories:
         assert resp.status_code == 500
         body = resp.json()
         assert body["data"] is None
-        assert "connection timeout" in body["error"]
+        assert body["error"] == "Internal server error"  # C5: detail not leaked
 
 
 # ---------------------------------------------------------------------------

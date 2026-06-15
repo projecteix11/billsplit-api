@@ -9,6 +9,7 @@ from app.middleware.rate_limit import limiter
 from app.models import UpdateQuantityBody, UpdatePriceBody
 from app.services import activity as activity_svc
 from app.services import orders as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -60,7 +61,7 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/order-items/payment-status")
@@ -107,7 +108,7 @@ def update_payment_status(request: Request, body: PaymentStatusBody, _user_id: s
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/order-items/payment-portions")
@@ -164,7 +165,7 @@ def update_payment_portions(request: Request, body: PaymentPortionsBody, _user_i
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/order-items/{item_id}")
@@ -205,7 +206,7 @@ def delete_order_item(request: Request, item_id: str, _user_id: str = Depends(re
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/order-items/{item_id}/quantity")
@@ -247,7 +248,7 @@ def update_item_quantity(request: Request, item_id: str, body: UpdateQuantityBod
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/order-items/{item_id}/price")
@@ -289,4 +290,4 @@ def update_item_price(request: Request, item_id: str, body: UpdatePriceBody, _us
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

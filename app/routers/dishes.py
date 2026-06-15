@@ -17,6 +17,7 @@ from app.models import (
     UpdateDishIngredientBody,
 )
 from app.services import dishes as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -30,7 +31,7 @@ async def get_dishes(tenant_id: str = Depends(get_current_tenant)):
         data = svc.get_all_dishes(tenant_id)
         return {"data": [d.model_dump() for d in data], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/dishes/{dish_id}")
@@ -41,7 +42,7 @@ def get_dish(dish_id: str):
             return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
         return {"data": dish.model_dump(), "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/dishes", status_code=201)
@@ -51,7 +52,7 @@ async def create_dish(request: Request, body: CreateDishBody, _user_id: str = De
         dish = svc.create_dish(body, tenant_id)
         return JSONResponse(status_code=201, content={"data": dish.model_dump(), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/dishes/{dish_id}")
@@ -64,7 +65,7 @@ def update_dish(request: Request, dish_id: str, body: UpdateDishBody, _user_id: 
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/dishes/{dish_id}")
@@ -76,7 +77,7 @@ def delete_dish(request: Request, dish_id: str, _user_id: str = Depends(require_
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 # ── Categories ──────────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ async def get_categories(tenant_id: str = Depends(get_current_tenant)):
         data = svc.get_categories(tenant_id)
         return {"data": [c.model_dump() for c in data], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/categories", status_code=201)
@@ -98,7 +99,7 @@ async def create_category(request: Request, body: CreateCategoryBody, _user_id: 
         category = svc.create_category(body.name, body.sort_order or 0, tenant_id, body.requires_kitchen if body.requires_kitchen is not None else True)
         return JSONResponse(status_code=201, content={"data": category.model_dump(), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/categories/{category_id}")
@@ -108,7 +109,7 @@ def update_category(request: Request, category_id: str, body: UpdateCategoryBody
         svc.update_category(category_id, body.name, body.sort_order, body.requires_kitchen)
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/categories/{category_id}")
@@ -118,7 +119,7 @@ def delete_category(request: Request, category_id: str, _user_id: str = Depends(
         svc.delete_category(category_id)
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 # ── Allergens ───────────────────────────────────────────────────────────────
@@ -130,7 +131,7 @@ def get_allergens():
         data = svc.get_allergens()
         return {"data": [a.model_dump() for a in data], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/allergens", status_code=201)
@@ -140,7 +141,7 @@ def create_allergen(request: Request, body: CreateAllergenBody, _user_id: str = 
         allergen = svc.create_allergen(body)
         return JSONResponse(status_code=201, content={"data": allergen.model_dump(), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/allergens/{allergen_id}")
@@ -150,7 +151,7 @@ def update_allergen(request: Request, allergen_id: str, body: UpdateAllergenBody
         svc.update_allergen(allergen_id, body.name, body.icon)
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/allergens/{allergen_id}")
@@ -160,7 +161,7 @@ def delete_allergen(request: Request, allergen_id: str, _user_id: str = Depends(
         svc.delete_allergen(allergen_id)
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 # ── Dish allergens ──────────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ def set_dish_allergens(
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 # ── Dish ingredients ────────────────────────────────────────────────────────
@@ -197,7 +198,7 @@ def get_dish_ingredients(dish_id: str):
         data = svc.get_dish_ingredients(dish_id)
         return {"data": [i.model_dump() for i in data], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/dishes/{dish_id}/ingredients", status_code=201)
@@ -213,7 +214,7 @@ async def create_dish_ingredient(
         ingredient = svc.create_dish_ingredient(dish_id, body, tenant_id)
         return JSONResponse(status_code=201, content={"data": ingredient.model_dump(), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/dishes/{dish_id}/ingredients/{ingredient_id}")
@@ -232,7 +233,7 @@ def update_dish_ingredient(
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/dishes/{dish_id}/ingredients/{ingredient_id}")
@@ -250,7 +251,7 @@ def delete_dish_ingredient(
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Dish not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 # ── Custom dishes ───────────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ def get_custom_dishes_for_table(table_id: str):
         data = svc.get_custom_dishes_for_table(table_id)
         return {"data": [d.model_dump() for d in data], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/custom-dishes", status_code=201)
@@ -276,7 +277,7 @@ def create_custom_dish(
         dish = svc.create_custom_dish(body, user_id)
         return JSONResponse(status_code=201, content={"data": dish.model_dump(), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/custom-dishes/{custom_dish_id}")
@@ -290,4 +291,4 @@ def delete_custom_dish(
         svc.delete_custom_dish(custom_dish_id)
         return {"data": None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

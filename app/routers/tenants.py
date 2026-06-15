@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from app.db.supabase import get_client
 from app.middleware.auth import require_auth
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -35,7 +36,7 @@ def list_public_tenants():
         )
         return {"data": rows, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/tenants/by-slug/{slug}")
@@ -55,4 +56,4 @@ def get_tenant_by_slug(slug: str):
             return JSONResponse(status_code=404, content={"data": None, "error": "Tenant not found"})
         return {"data": rows[0], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

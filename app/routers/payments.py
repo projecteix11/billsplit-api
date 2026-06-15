@@ -11,6 +11,7 @@ from app.logging import log_event, LogFactory
 from app.services import activity as activity_svc
 from app.services import orders as order_svc
 from app.services import payments as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -43,7 +44,7 @@ def create_payment(request: Request, body: CreatePaymentBody, _user_id: str = De
             "payment_failed", body.orderId, body.amount, body.method,
             error=str(e),
         ))
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/payments/redsys/{order_number}")
@@ -60,7 +61,7 @@ def get_redsys_payment(order_number: str):
             return JSONResponse(status_code=404, content={"data": None, "error": "Payment not found"})
         return {"data": payment.model_dump(), "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/payments/redsys-initiate")

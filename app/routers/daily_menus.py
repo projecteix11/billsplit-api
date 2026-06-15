@@ -13,6 +13,7 @@ from app.models import (
     UpdateDailyMenuSectionBody,
 )
 from app.services import daily_menus as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ async def get_daily_menus(all: bool = False, tenant_id: str = Depends(require_fe
             data = svc.get_daily_menus(tenant_id)
         return {"data": [m.model_dump() for m in data], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/daily-menus/{menu_id}")
@@ -40,7 +41,7 @@ def get_daily_menu(menu_id: str):
             return JSONResponse(status_code=404, content={"data": None, "error": "Menu not found"})
         return {"data": menu.model_dump(), "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/daily-menus", status_code=201)
@@ -50,7 +51,7 @@ async def create_daily_menu(request: Request, body: CreateDailyMenuBody, _user_i
         menu = svc.create_daily_menu(body, tenant_id)
         return JSONResponse(status_code=201, content={"data": menu.model_dump(), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/daily-menus/{menu_id}")
@@ -63,7 +64,7 @@ def update_daily_menu(request: Request, menu_id: str, body: UpdateDailyMenuBody,
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/daily-menus/{menu_id}")
@@ -75,7 +76,7 @@ def delete_daily_menu(request: Request, menu_id: str, _user_id: str = Depends(re
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 # ── Sections ───────────────────────────────────────────────────────────────
@@ -90,7 +91,7 @@ def create_section(request: Request, menu_id: str, body: CreateDailyMenuSectionB
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/daily-menu-sections/{section_id}")
@@ -102,7 +103,7 @@ def update_section(request: Request, section_id: str, body: UpdateDailyMenuSecti
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu section not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/daily-menu-sections/{section_id}")
@@ -114,7 +115,7 @@ def delete_section(request: Request, section_id: str, _user_id: str = Depends(re
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu section not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 # ── Items ──────────────────────────────────────────────────────────────────
@@ -129,7 +130,7 @@ def create_item(request: Request, section_id: str, body: CreateDailyMenuItemBody
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu section not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/daily-menu-items/{item_id}")
@@ -141,7 +142,7 @@ def update_item(request: Request, item_id: str, body: UpdateDailyMenuItemBody, _
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.delete("/daily-menu-items/{item_id}")
@@ -153,4 +154,4 @@ def delete_item(request: Request, item_id: str, _user_id: str = Depends(require_
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Daily menu item not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

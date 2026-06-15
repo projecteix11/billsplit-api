@@ -7,6 +7,7 @@ from app.middleware.auth import require_auth
 from app.middleware.tenant import require_feature
 from app.models import CreateActivityEventBody
 from app.services import activity as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ def list_activity_events(
         )
         return {"data": [event.model_dump() for event in events], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/activity-events", status_code=201)
@@ -53,4 +54,4 @@ def create_activity_event(
         event = svc.create_manual_event(body, tenant_id=tenant_id, request=request)
         return JSONResponse(status_code=201, content={"data": event.model_dump(), "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

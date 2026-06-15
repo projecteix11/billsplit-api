@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.middleware.rate_limit import limiter
 from app.services import guest_session as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -29,4 +30,4 @@ def open_guest_session(request: Request, body: GuestSessionBody):
             return JSONResponse(status_code=404, content={"data": None, "error": "Table not found"})
         return JSONResponse(status_code=201, content={"data": session, "error": None})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

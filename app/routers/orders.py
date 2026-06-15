@@ -11,6 +11,7 @@ from app.models import CreateOrderBody, AddItemsBody
 from app.db.supabase import get_client
 from app.services import activity as activity_svc
 from app.services import orders as svc
+from app.http_errors import internal_error
 
 router = APIRouter()
 
@@ -54,7 +55,7 @@ async def create_order(request: Request, body: CreateOrderBody, tenant_id: str =
             table_id=body.tableId,
             metadata={"error": str(e), "traceback": traceback.format_exc()[-500:]},
         ))
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/orders/{order_id}")
@@ -65,7 +66,7 @@ def get_order_by_id(order_id: str):
             return JSONResponse(status_code=404, content={"data": None, "error": "Order not found"})
         return {"data": order.model_dump(), "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.post("/orders/{order_id}/items")
@@ -93,7 +94,7 @@ def add_items_to_order(request: Request, order_id: str, body: AddItemsBody, _pri
     except ValueError as e:
         return JSONResponse(status_code=400, content={"data": None, "error": str(e)})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.patch("/orders/{order_id}/close")
@@ -109,7 +110,7 @@ def close_order(request: Request, order_id: str, tenant_id: str = Depends(get_cu
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order not found"})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/tables/{table_id}")
@@ -120,7 +121,7 @@ def get_table(table_id: str):
             return JSONResponse(status_code=404, content={"data": None, "error": "Table not found"})
         return {"data": rows[0], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/tables/{table_id}/open-order")
@@ -129,7 +130,7 @@ def get_open_order_for_table(table_id: str):
         order = svc.get_open_order_for_table(table_id)
         return {"data": order.model_dump() if order else None, "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)
 
 
 @router.get("/orders")
@@ -143,4 +144,4 @@ async def list_orders(status: str = "open", kitchen_only: bool = False, _user_id
         orders = svc.fetch_orders(tenant_id, status, kitchen_only=kitchen_only)
         return {"data": [o.model_dump() for o in orders], "error": None}
     except Exception as e:
-        return JSONResponse(status_code=500, content={"data": None, "error": str(e)})
+        return internal_error(e)

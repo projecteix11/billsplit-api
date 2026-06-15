@@ -13,6 +13,7 @@ from app.logging import client as logging_client
 
 from app.middleware.auth import AuthError, auth_error_handler
 from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
+from app.http_errors import internal_error
 from app import routers
 
 supabase.init()
@@ -41,6 +42,15 @@ app.add_middleware(RequestLoggingMiddleware)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.add_exception_handler(AuthError, auth_error_handler)
+
+
+async def _unhandled_exception_handler(_request, exc):
+    # Catch-all (C5): any exception not handled by an endpoint's try/except
+    # returns a sanitized 500 instead of a raw error string / stack trace.
+    return internal_error(exc)
+
+
+app.add_exception_handler(Exception, _unhandled_exception_handler)
 
 app.add_middleware(SlowAPIMiddleware)
 
