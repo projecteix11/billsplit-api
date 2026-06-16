@@ -493,9 +493,9 @@ def _resolve_ingredient_customizations(
             )
 
         # Fetch dish_ingredients for validation
-        di_rows = get_client().table("dish_ingredients").select("ingredient_id, present").eq("dish_id", item.dish_id).execute().data or []
-        dish_ingredient_map: dict[str, bool] = {
-            r["ingredient_id"]: r["present"] for r in di_rows
+        di_rows = get_client().table("dish_ingredients").select("ingredient_id, present, can_remove, discount_price").eq("dish_id", item.dish_id).execute().data or []
+        dish_ingredient_map: dict[str, dict] = {
+            r["ingredient_id"]: r for r in di_rows
         }
 
         # Validate and resolve added ingredients
@@ -517,8 +517,9 @@ def _resolve_ingredient_customizations(
                     raise ValueError(
                         f"ingredient {ing_id} does not belong to dish {item.dish_id}"
                     )
+                di_info = dish_ingredient_map[ing_id]
                 # Must be non-default (present=false)
-                if dish_ingredient_map.get(ing_id, True):
+                if di_info.get("present", True):
                     raise ValueError(
                         f"ingredient {ing_id} is a default ingredient, cannot be added as extra"
                     )
@@ -536,10 +537,16 @@ def _resolve_ingredient_customizations(
                 raise ValueError(
                     f"ingredient {rid} does not belong to dish {item.dish_id}"
                 )
-            if not dish_ingredient_map.get(rid, True):
+            di_info = dish_ingredient_map[rid]
+            if not di_info.get("present", True):
                 raise ValueError(
                     f"ingredient {rid} is not a default ingredient, cannot be removed"
                 )
+            if not di_info.get("can_remove", False):
+                raise ValueError(
+                    f"ingredient {rid} cannot be removed (removal disabled)"
+                )
+            extra_total -= float(di_info.get("discount_price", 0.0))
             item_ing_rows.append({
                 "ingredient_id": rid,
                 "action": "removed",

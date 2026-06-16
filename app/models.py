@@ -169,6 +169,8 @@ class DishIngredient(BaseModel):
     is_default: bool = True
     extra_price: float = 0
     sort_order: int = 0
+    can_remove: bool = False
+    discount_price: float = 0
 
 
 class CreateDishIngredientBody(BaseModel):
@@ -176,6 +178,8 @@ class CreateDishIngredientBody(BaseModel):
     is_default: bool = True
     extra_price: float = 0
     sort_order: int = 0
+    can_remove: bool = False
+    discount_price: float = 0
 
 
 class UpdateDishIngredientBody(BaseModel):
@@ -183,6 +187,8 @@ class UpdateDishIngredientBody(BaseModel):
     is_default: Optional[bool] = None
     extra_price: Optional[float] = None
     sort_order: Optional[int] = None
+    can_remove: Optional[bool] = None
+    discount_price: Optional[float] = None
 
 
 # ── Full dish (with relations) ──────────────────────────────────────────────

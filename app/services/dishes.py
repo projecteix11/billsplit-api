@@ -22,7 +22,7 @@ from app.models import (
 _DISH_SELECT = (
     "*"
     ",allergens:dish_allergens(allergen:allergens(id,name,icon))"
-    ",ingredients:dish_ingredients(id,ingredient_id,present,sort_order"
+    ",ingredients:dish_ingredients(id,ingredient_id,present,sort_order,can_remove,discount_price"
     ",ingredient:ingredients(id,name,extra_price))"
 )
 
@@ -229,7 +229,7 @@ def set_dish_allergens(dish_id: str, allergen_ids: list[str], tenant_id: str) ->
 def get_dish_ingredients(dish_id: str) -> list[DishIngredient]:
     rows = (
         get_client().table("dish_ingredients")
-        .select("id,ingredient_id,present,sort_order,ingredient:ingredients(id,name,extra_price)")
+        .select("id,ingredient_id,present,sort_order,can_remove,discount_price,ingredient:ingredients(id,name,extra_price)")
         .eq("dish_id", dish_id)
         .order("sort_order")
         .execute()
@@ -247,6 +247,8 @@ def get_dish_ingredients(dish_id: str) -> list[DishIngredient]:
             is_default=row.get("present", True),
             extra_price=float(ing.get("extra_price", 0)),
             sort_order=row.get("sort_order", 0),
+            can_remove=row.get("can_remove", False),
+            discount_price=float(row.get("discount_price", 0)),
         ))
     return result
 
@@ -269,6 +271,8 @@ def create_dish_ingredient(dish_id: str, body: CreateDishIngredientBody, tenant_
         "ingredient_id": ingredient_id,
         "present": body.is_default,
         "sort_order": body.sort_order,
+        "can_remove": body.can_remove,
+        "discount_price": body.discount_price,
     }
     get_client().table("dish_ingredients").insert(junction).execute()
 
@@ -279,6 +283,8 @@ def create_dish_ingredient(dish_id: str, body: CreateDishIngredientBody, tenant_
         is_default=body.is_default,
         extra_price=body.extra_price,
         sort_order=body.sort_order,
+        can_remove=body.can_remove,
+        discount_price=body.discount_price,
     )
 
 
@@ -302,6 +308,10 @@ def update_dish_ingredient(
         junction_updates["present"] = updates["is_default"]
     if "sort_order" in updates:
         junction_updates["sort_order"] = updates["sort_order"]
+    if "can_remove" in updates:
+        junction_updates["can_remove"] = updates["can_remove"]
+    if "discount_price" in updates:
+        junction_updates["discount_price"] = updates["discount_price"]
 
     if ing_updates:
         get_client().table("ingredients").update(ing_updates).eq("id", ingredient_id).execute()
@@ -375,6 +385,8 @@ def _parse_dish_full(row: dict) -> DishFull:
             is_default=entry.get("present", True),
             extra_price=float(ing.get("extra_price", 0)),
             sort_order=entry.get("sort_order", 0),
+            can_remove=entry.get("can_remove", False),
+            discount_price=float(entry.get("discount_price", 0)),
         ))
 
     # ── Map image: prefer img_medium, fallback to img_small ──

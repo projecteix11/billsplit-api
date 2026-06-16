@@ -8,25 +8,30 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
 
     For each item in the order:
     1. Get the dish_id and quantity
-    2. Get all ingredients for that dish from dish_ingredients + ingredients
+    2. Skip ingredients that the client removed in the customization
     3. Find matching stock_items by ingredient name
     4. Deduct quantity from stock_items.current_quantity
     """
     if not items or not tenant_id:
         return
 
-    dish_qty_map: dict[str, float] = {}
     for item in items:
-        if item.dish_id:
-            dish_qty_map[item.dish_id] = dish_qty_map.get(item.dish_id, 0) + item.quantity
+        if not item.dish_id or item.quantity <= 0:
+            continue
 
-    if not dish_qty_map:
-        return
+        # Extract removed ingredient IDs from customization
+        removed_ids = []
+        if item.customization and isinstance(item.customization, dict):
+            raw_removed = item.customization.get("removed_ingredients") or []
+            for r in raw_removed:
+                if isinstance(r, dict) and "id" in r:
+                    removed_ids.append(r["id"])
+                elif isinstance(r, str):
+                    removed_ids.append(r)
 
-    for dish_id, order_qty in dish_qty_map.items():
         ing_rows = get_client().table("dish_ingredients").select(
             "ingredient_id,ingredient:ingredients(id,name)"
-        ).eq("dish_id", dish_id).execute().data or []
+        ).eq("dish_id", item.dish_id).execute().data or []
 
         if not ing_rows:
             continue
@@ -34,6 +39,11 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
         for ing_row in ing_rows:
             ingredient = ing_row.get("ingredient")
             if not ingredient:
+                continue
+
+            ingredient_id = ingredient.get("id")
+            if ingredient_id in removed_ids:
+                # This ingredient was removed by the diner, skip stock deduction!
                 continue
 
             ingredient_name = ingredient.get("name")
@@ -49,7 +59,7 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
 
             stock_item = stock_rows[0]
             current_qty = float(stock_item["current_quantity"])
-            new_qty = max(0.0, current_qty - order_qty)
+            new_qty = max(0.0, current_qty - item.quantity)
 
             get_client().table("stock_items").update(
                 {"current_quantity": new_qty}
@@ -58,10 +68,10 @@ def deduct_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             get_client().table("stock_movements").insert({
                 "stock_item_id": stock_item["id"],
                 "type": "consumo",
-                "quantity": -order_qty,
+                "quantity": -item.quantity,
                 "quantity_before": current_qty,
                 "quantity_after": new_qty,
-                "notes": "Consumo automático",
+                "notes": f"Consumo automático ({item.dish_name})",
                 "tenant_id": tenant_id,
             }).execute()
 
@@ -74,18 +84,23 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
     if not items or not tenant_id:
         return
 
-    dish_qty_map: dict[str, float] = {}
     for item in items:
-        if item.dish_id:
-            dish_qty_map[item.dish_id] = dish_qty_map.get(item.dish_id, 0) + item.quantity
+        if not item.dish_id or item.quantity <= 0:
+            continue
 
-    if not dish_qty_map:
-        return
+        # Extract removed ingredient IDs from customization
+        removed_ids = []
+        if item.customization and isinstance(item.customization, dict):
+            raw_removed = item.customization.get("removed_ingredients") or []
+            for r in raw_removed:
+                if isinstance(r, dict) and "id" in r:
+                    removed_ids.append(r["id"])
+                elif isinstance(r, str):
+                    removed_ids.append(r)
 
-    for dish_id, restore_qty in dish_qty_map.items():
         ing_rows = get_client().table("dish_ingredients").select(
             "ingredient_id,ingredient:ingredients(id,name)"
-        ).eq("dish_id", dish_id).execute().data or []
+        ).eq("dish_id", item.dish_id).execute().data or []
 
         if not ing_rows:
             continue
@@ -93,6 +108,11 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
         for ing_row in ing_rows:
             ingredient = ing_row.get("ingredient")
             if not ingredient:
+                continue
+
+            ingredient_id = ingredient.get("id")
+            if ingredient_id in removed_ids:
+                # This ingredient was removed, so it was never deducted. Skip restoring!
                 continue
 
             ingredient_name = ingredient.get("name")
@@ -108,7 +128,7 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
 
             stock_item = stock_rows[0]
             current_qty = float(stock_item["current_quantity"])
-            new_qty = current_qty + restore_qty
+            new_qty = current_qty + item.quantity
 
             get_client().table("stock_items").update(
                 {"current_quantity": new_qty}
@@ -117,9 +137,9 @@ def restore_stock_for_items(items: list[NewOrderItem], tenant_id: str) -> None:
             get_client().table("stock_movements").insert({
                 "stock_item_id": stock_item["id"],
                 "type": "devolucion",
-                "quantity": restore_qty,
+                "quantity": item.quantity,
                 "quantity_before": current_qty,
                 "quantity_after": new_qty,
-                "notes": "Devolución automática",
+                "notes": f"Devolución automática ({item.dish_name})",
                 "tenant_id": tenant_id,
             }).execute()

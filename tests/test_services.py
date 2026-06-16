@@ -508,7 +508,7 @@ def _make_resolve_mock():
         MagicMock(data=[
             {"ingredient_id": ING_EXTRA_1, "present": False},
             {"ingredient_id": ING_EXTRA_2, "present": False},
-            {"ingredient_id": ING_DEFAULT_1, "present": True},
+            {"ingredient_id": ING_DEFAULT_1, "present": True, "can_remove": True, "discount_price": 0.0},
         ]),
         MagicMock(data=[
             {"id": ING_EXTRA_1, "extra_price": 1.50},
@@ -586,6 +586,53 @@ class TestResolveIngredientCustomizations:
         assert prices[0] == 10.0
         assert len(rows[0]) == 1
         assert rows[0][0]["action"] == "removed"
+
+    def test_removed_ingredients_with_discount_price_reduces_price(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [],
+                "removed_ingredients": [ING_DEFAULT_1],
+            },
+        )]
+        # Custom mock returning a default ingredient with can_remove=True and discount_price=1.50
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": DISH_ID, "price": 10.0, "max_extra_choices": 2}]),
+            MagicMock(data=[
+                {"ingredient_id": ING_DEFAULT_1, "present": True, "can_remove": True, "discount_price": 1.50},
+            ]),
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            prices, rows = _resolve_ingredient_customizations(items)
+        assert prices[0] == 8.50  # 10.0 - 1.50
+        assert len(rows[0]) == 1
+        assert rows[0][0]["action"] == "removed"
+
+    def test_removed_ingredients_cannot_be_removed_if_disabled(self):
+        from app.services.orders import _resolve_ingredient_customizations
+        items = [NewOrderItem(
+            dish_name="Pizza", dish_price=10.0, quantity=1, dish_id=DISH_ID,
+            customization={
+                "added_ingredients": [],
+                "removed_ingredients": [ING_DEFAULT_1],
+            },
+        )]
+        # Custom mock returning can_remove=False
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=[{"id": DISH_ID, "price": 10.0, "max_extra_choices": 2}]),
+            MagicMock(data=[
+                {"ingredient_id": ING_DEFAULT_1, "present": True, "can_remove": False},
+            ]),
+        ]
+        import pytest
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            with pytest.raises(ValueError, match="cannot be removed"):
+                _resolve_ingredient_customizations(items)
 
     def test_uses_server_extra_price_not_frontend(self):
         from app.services.orders import _resolve_ingredient_customizations
@@ -798,7 +845,7 @@ class TestBuildAndInsertItemsWithIngredients:
             MagicMock(data=[{"id": DISH_ID, "price": 10.0, "max_extra_choices": 2}]),
             MagicMock(data=[
                 {"ingredient_id": ING_EXTRA_1, "present": False},
-                {"ingredient_id": ING_DEFAULT_1, "present": True},
+                {"ingredient_id": ING_DEFAULT_1, "present": True, "can_remove": True},
             ]),
             MagicMock(data=[{"id": ING_EXTRA_1, "extra_price": 1.50}]),
             # order_items insert
