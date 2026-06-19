@@ -64,6 +64,25 @@ def verify_token(token: str) -> str:
     return user_id
 
 
+def is_platform_admin(user_id: str) -> bool:
+    """True if user_id is a row in public.platform_admins. Uses the service-role
+    client (bypasses RLS) so the check is authoritative regardless of the
+    caller's own row visibility. This is the same membership the adminPanel's
+    is_platform_admin() SQL helper gates on."""
+    if not user_id:
+        return False
+    rows = (
+        get_client()
+        .table("platform_admins")
+        .select("user_id")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return bool(rows)
+
+
 def verify_token_full(token: str) -> tuple[str, str, str]:
     """Verify token and return (user_id, tenant_id, role). Result is cached for 2 minutes."""
     cached = _TOKEN_CACHE.get(token)
