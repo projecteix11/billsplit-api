@@ -1,0 +1,28 @@
+name: CI
+
+# Merge gate (XC-4): the test suite must pass before a PR can merge to main.
+# The deploy workflow runs only after merge, so this is the gate that keeps the
+# default branch green.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: ⚙️ Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🧪 Run tests
+        run: pytest

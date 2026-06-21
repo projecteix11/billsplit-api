@@ -53,14 +53,46 @@ class TestBroadcastEndpoint:
             )
         assert resp.status_code == 403
 
-    def test_returns_422_without_api_key_header(self, client: TestClient):
+    def test_returns_403_without_any_auth(self, client: TestClient):
         with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
             resp = client.post(
                 "/notifications/broadcast",
                 json=VALID_BODY,
                 headers={"x-tenant-id": VALID_TENANT_ID},
             )
-        assert resp.status_code == 422
+        assert resp.status_code == 403
+
+    def test_returns_200_with_platform_admin_jwt(self, client: TestClient):
+        with patch("app.routers.notifications.verify_token_full", return_value=("admin-uid", "", "")):
+            with patch("app.routers.notifications.is_platform_admin", return_value=True):
+                with patch("app.services.notifications.get_client", return_value=make_mock_client()):
+                    with patch("app.services.notifications.httpx.post", return_value=_mock_broadcast_resp()):
+                        resp = client.post(
+                            "/notifications/broadcast",
+                            json=VALID_BODY,
+                            headers={"authorization": "Bearer admin-jwt", "x-tenant-id": VALID_TENANT_ID},
+                        )
+        assert resp.status_code == 200
+        assert resp.json() == {"data": {"status": "sent"}}
+
+    def test_returns_403_when_jwt_is_not_platform_admin(self, client: TestClient):
+        with patch("app.routers.notifications.verify_token_full", return_value=("diner-uid", "t1", "")):
+            with patch("app.routers.notifications.is_platform_admin", return_value=False):
+                resp = client.post(
+                    "/notifications/broadcast",
+                    json=VALID_BODY,
+                    headers={"authorization": "Bearer diner-jwt", "x-tenant-id": VALID_TENANT_ID},
+                )
+        assert resp.status_code == 403
+
+    def test_returns_401_with_invalid_jwt(self, client: TestClient):
+        with patch("app.routers.notifications.verify_token_full", side_effect=ValueError("bad")):
+            resp = client.post(
+                "/notifications/broadcast",
+                json=VALID_BODY,
+                headers={"authorization": "Bearer garbage", "x-tenant-id": VALID_TENANT_ID},
+            )
+        assert resp.status_code == 401
 
     def test_returns_422_without_tenant_id_header(self, client: TestClient):
         with patch("app.routers.notifications._INTERNAL_API_KEY", INTERNAL_API_KEY):
