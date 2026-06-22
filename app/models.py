@@ -18,6 +18,7 @@ class Dish(BaseModel):
     max_included_choices: Optional[int] = None
     max_extra_choices: Optional[int] = None
     is_variable_price: bool = False
+    cooking_point_enabled: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -40,6 +41,7 @@ class CreateDishBody(BaseModel):
     is_variable_price: bool = False
     max_included_choices: Optional[int] = None
     max_extra_choices: Optional[int] = None
+    cooking_point_enabled: Optional[bool] = None
 
 
 class UpdateDishBody(BaseModel):
@@ -53,6 +55,7 @@ class UpdateDishBody(BaseModel):
     is_variable_price: Optional[bool] = None
     max_included_choices: Optional[int] = None
     max_extra_choices: Optional[int] = None
+    cooking_point_enabled: Optional[bool] = None
 
 
 # ── Allergens ───────────────────────────────────────────────────────────────
