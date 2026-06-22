@@ -48,3 +48,21 @@ def _send(event: dict) -> None:
 def log_event(event: dict) -> None:
     """Queue an event to be sent in a background daemon thread."""
     threading.Thread(target=_send, args=(event,), daemon=True).start()
+
+
+def _send_batch(events: list[dict]) -> None:
+    if not _client or not events:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    for event in events:
+        if "_time" not in event and "timestamp" not in event:
+            event["_time"] = now
+    try:
+        _client.ingest_events(dataset=_dataset, events=events)
+    except Exception:
+        pass  # logging must never break the application
+
+
+def log_events(events: list[dict]) -> None:
+    """Queue a batch of events, sent in one ingest call on a daemon thread."""
+    threading.Thread(target=_send_batch, args=(events,), daemon=True).start()

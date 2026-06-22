@@ -40,8 +40,15 @@ jobs:
           ref: main
 
       - name: 📨 Notify Discord
+        # Untrusted input (commit message) must reach the shell only via env,
+        # never via ${{ }} interpolation inside `run` (script injection).
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1)
-          curl -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\": \"# ⚠️ GIT PULL API\n- ${COMMIT_MSG}\"}"
+          FIRST_LINE=$(printf '%s\n' "$COMMIT_MSG" | head -1)
+          jq -n --arg msg "$FIRST_LINE" \
+            '{content: ("# ⚠️ GIT PULL API\n- " + $msg)}' \
+            | curl -sS -X POST "$WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d @-
