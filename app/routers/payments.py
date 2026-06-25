@@ -93,6 +93,22 @@ def redsys_initiate(request: Request, body: RedsysInitiateBody, _principal: None
         return JSONResponse(status_code=500, content={"data": None, "error": "Internal server error"})
 
 
+@router.post("/payments/mock-confirm/{order_number}")
+def mock_confirm_payment(order_number: str):
+    import os
+    if os.getenv("APP_ENV") != "local":
+        return JSONResponse(status_code=403, content={"error": "Only allowed in local development"})
+    try:
+        payment = svc.get_payment_by_redsys_order(order_number)
+        if not payment:
+            return JSONResponse(status_code=404, content={"error": "Payment not found"})
+        amount_cents = int(round(payment.amount * 100))
+        svc.confirm_redsys_payment(order_number, amount_cents)
+        return {"data": "confirmed", "error": None}
+    except Exception as e:
+        return internal_error(e)
+
+
 @router.post("/payments/redsys-notify")
 async def redsys_notify(
     request: Request,
