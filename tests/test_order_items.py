@@ -473,3 +473,56 @@ class TestUpdateOrderItemPrice:
                 resp = client.patch("/order-items/item-1/price", json={"price": 8.0}, headers=_auth_headers())
 
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/order-items/{item_id}/split-portions
+# ---------------------------------------------------------------------------
+
+class TestUpdateSplitPortions:
+    def test_update_split_portions_returns_200(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),  # _assert_item_owner
+            MagicMock(data=[{"paid_portions": 0, "payment_status": "unassigned"}]),  # select paid_portions
+            MagicMock(data=None),  # update split_portions
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            resp = client.patch(
+                "/order-items/item-1/split-portions",
+                json={"splitPortions": 3},
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {"data": None, "error": None}
+
+    def test_update_split_portions_rejects_paid_item(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),  # _assert_item_owner
+            MagicMock(data=[{"paid_portions": 2, "payment_status": "paid"}]),  # select paid_portions
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            resp = client.patch(
+                "/order-items/item-1/split-portions",
+                json={"splitPortions": 3},
+            )
+        assert resp.status_code == 400
+        assert "cannot split paid item" in resp.json()["error"]
+
+    def test_update_split_portions_rejects_less_than_paid(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),  # _assert_item_owner
+            MagicMock(data=[{"paid_portions": 2, "payment_status": "unassigned"}]),  # select paid_portions
+        ]
+        with patch("app.services.orders.get_client") as mock_gc:
+            mock_gc.return_value = mock_q
+            resp = client.patch(
+                "/order-items/item-1/split-portions",
+                json={"splitPortions": 1},
+            )
+        assert resp.status_code == 400
+        assert "cannot be less than paid_portions" in resp.json()["error"]
+

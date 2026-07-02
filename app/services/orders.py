@@ -386,6 +386,35 @@ def update_items_payment_portions(allocations: list[dict], tenant_id: str) -> li
     return updated_ids
 
 
+def update_item_split_portions(item_id: str, split_portions: int, tenant_id: str) -> None:
+    """Update split portions for a single order item (diner-initiated)."""
+    order_id = _assert_item_owner(item_id, tenant_id)
+    rows = (
+        get_client()
+        .table("order_items")
+        .select("paid_portions, payment_status")
+        .eq("id", item_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise ValueError("item not found")
+
+    if rows[0].get("payment_status") == "paid":
+        raise ValueError("cannot split paid item")
+
+    paid = int(rows[0].get("paid_portions") or 0)
+    if split_portions < paid:
+        raise ValueError(f"split_portions cannot be less than paid_portions ({paid})")
+
+    get_client().table("order_items").update({
+        "split_portions": split_portions,
+    }).eq("id", item_id).execute()
+
+
+
 def _enrich_customization(cust: dict) -> dict:
     """Resolve ingredient UUIDs to names in customization for display."""
     if not cust:

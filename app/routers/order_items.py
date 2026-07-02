@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.logging import log_event, LogFactory
-from app.middleware.auth import require_auth
+from app.middleware.auth import require_auth, require_customer_principal
 from app.middleware.tenant import require_feature, get_current_tenant
 from app.middleware.rate_limit import limiter
 from app.models import UpdateQuantityBody, UpdatePriceBody
@@ -34,6 +34,11 @@ class PaymentPortionAllocation(BaseModel):
 
 class PaymentPortionsBody(BaseModel):
     allocations: list[PaymentPortionAllocation]
+
+
+class UpdateSplitPortionsBody(BaseModel):
+    splitPortions: int
+
 
 
 @router.patch("/order-items/{item_id}/kitchen-status")
@@ -164,6 +169,36 @@ def update_payment_portions(request: Request, body: PaymentPortionsBody, _user_i
         return {"data": None, "error": None}
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
+    except Exception as e:
+        return internal_error(e)
+
+
+@router.patch("/order-items/{item_id}/split-portions")
+@limiter.limit("20/minute")
+def update_split_portions(
+    request: Request,
+    item_id: str,
+    body: UpdateSplitPortionsBody,
+    _principal: None = Depends(require_customer_principal),
+    tenant_id: str = Depends(require_feature("payments")),
+):
+    if body.splitPortions < 1 or body.splitPortions > 50:
+        return JSONResponse(status_code=400, content={"data": None, "error": "splitPortions must be between 1 and 50"})
+    try:
+        svc.update_item_split_portions(item_id, body.splitPortions, tenant_id)
+        log_event(LogFactory.order_lifecycle(
+            "split_portions_updated", "",
+            metadata={"item_id": item_id, "split_portions": body.splitPortions},
+        ))
+        return {"data": None, "error": None}
+    except ValueError as e:
+        msg = str(e)
+        if msg == "forbidden":
+            return JSONResponse(status_code=403, content={"data": None, "error": "Forbidden"})
+        elif msg in ("item not found", "Order item not found"):
+            return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
+        else:
+            return JSONResponse(status_code=400, content={"data": None, "error": msg})
     except Exception as e:
         return internal_error(e)
 
