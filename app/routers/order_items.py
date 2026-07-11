@@ -51,6 +51,41 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
         )
     try:
         item_ctx = activity_svc.get_order_item_context(item_id)
+        
+        # Enforce role-based state transition restrictions
+        user_role = getattr(request.state, "role", "user")
+        current_status = item_ctx.get("kitchen_status") if item_ctx else "pending"
+        
+        if user_role == "waiter":
+            # Waiter can only transition from 'ready' to 'delivered'
+            if body.status != "delivered" or current_status != "ready":
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "data": None,
+                        "error": "Waiters can only change status from 'ready' to 'delivered'"
+                    }
+                )
+        elif user_role == "kitchen":
+            # Kitchen can only set status to pending, cooking, or ready
+            if body.status not in {"pending", "cooking", "ready"}:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "data": None,
+                        "error": "Kitchen staff can only change status to 'pending', 'cooking', or 'ready'"
+                    }
+                )
+            # Kitchen cannot modify delivered or cancelled items
+            if current_status in {"delivered", "cancelled"}:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "data": None,
+                        "error": f"Kitchen staff cannot modify items that are already '{current_status}'"
+                    }
+                )
+
         svc.update_item_kitchen_status(item_id, body.status, tenant_id)
         log_event(LogFactory.order_lifecycle(
             "kitchen_status_changed", "",
@@ -62,6 +97,33 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
             item=item_ctx,
             status=body.status,
         )
+
+        # Trigger notification to waiter if item is ready and notification feature is enabled
+        if body.status == "ready" and item_ctx:
+            from app.db import supabase
+            tenant_rows = (
+                supabase.get_client()
+                .table("tenants")
+                .select("features")
+                .eq("id", tenant_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            tenant_features = tenant_rows[0].get("features") or {} if tenant_rows else {}
+            if tenant_features.get("waiter_ready_notifications", False):
+                dish_name = item_ctx.get("dish_name", "Plat")
+                table_num = item_ctx.get("order", {}).get("table_number", "?")
+                from app.services.notifications import broadcast_notification
+                broadcast_notification(
+                    tenant_id=tenant_id,
+                    title="notifications.dish_ready_title",
+                    description="notifications.dish_ready_desc",
+                    notification_type="order_ready",
+                    params={"dish": dish_name, "table": str(table_num), "item_id": item_id},
+                )
+
         return {"data": None, "error": None}
     except ValueError:
         return JSONResponse(status_code=404, content={"data": None, "error": "Order item not found"})
