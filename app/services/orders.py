@@ -38,6 +38,16 @@ def _get_tenant_table_ids(tenant_id: str) -> list[str]:
 
 
 def _attach_table_label(row: dict) -> dict:
+    rt = row.get("restaurant_tables")
+    if rt:
+        if isinstance(rt, list) and rt:
+            rt = rt[0]
+        if isinstance(rt, dict):
+            label = rt.get("label")
+            if label:
+                row["table_label"] = label
+                return row
+
     table_id = row.get("table_id")
     if not table_id:
         return row
@@ -79,14 +89,14 @@ def fetch_orders(tenant_id: str, status: str, kitchen_only: bool = False) -> lis
 
 
 def get_order_by_id(order_id: str) -> Order | None:
-    rows = get_client().table("orders").select("*, items:order_items(*)").eq("id", order_id).limit(1).execute().data or []
+    rows = get_client().table("orders").select("*, items:order_items(*), restaurant_tables(label, number)").eq("id", order_id).limit(1).execute().data or []
     if not rows:
         return None
     return Order(**_attach_table_label(rows[0]))
 
 
 def get_open_order_for_table(table_id: str) -> Order | None:
-    rows = get_client().table("orders").select("*, items:order_items(*)").eq("table_id", table_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
+    rows = get_client().table("orders").select("*, items:order_items(*), restaurant_tables(label, number)").eq("table_id", table_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
     if not rows:
         return None
     return Order(**_attach_table_label(rows[0]))
@@ -483,12 +493,56 @@ def _resolve_ingredient_customizations(
     dish_prices: dict[str, float] = {}
     dish_max_extras: dict[str, int | None] = {}
     dish_variable_price: dict[str, bool] = {}
-    for did in dish_ids:
+    
+    if len(dish_ids) == 1:
+        did = list(dish_ids)[0]
         rows = get_client().table("dishes").select("id, price, max_extra_choices, is_variable_price").eq("id", did).limit(1).execute().data or []
-        if rows:
-            dish_prices[did] = float(rows[0]["price"])
-            dish_max_extras[did] = rows[0].get("max_extra_choices")
-            dish_variable_price[did] = rows[0].get("is_variable_price", False)
+    else:
+        rows = (
+            get_client()
+            .table("dishes")
+            .select("id, price, max_extra_choices, is_variable_price")
+            .in_("id", list(dish_ids))
+            .execute()
+            .data
+            or []
+        )
+    for r in rows:
+        did = r["id"]
+        dish_prices[did] = float(r["price"])
+        dish_max_extras[did] = r.get("max_extra_choices")
+        dish_variable_price[did] = r.get("is_variable_price", False)
+
+    # Batch-fetch dish_ingredients for all dishes that have customization
+    customized_dish_ids = {
+        item.dish_id for item in items 
+        if item.dish_id and item.customization and 
+        (item.customization.get("added_ingredients") or item.customization.get("removed_ingredients"))
+    }
+    
+    di_by_dish: dict[str, list[dict]] = {}
+    if customized_dish_ids:
+        if len(customized_dish_ids) == 1:
+            did = list(customized_dish_ids)[0]
+            di_rows = get_client().table("dish_ingredients").select("ingredient_id, present, can_remove, discount_price").eq("dish_id", did).execute().data or []
+            for r in di_rows:
+                r["dish_id"] = did
+        else:
+            di_rows = (
+                get_client()
+                .table("dish_ingredients")
+                .select("dish_id, ingredient_id, present, can_remove, discount_price")
+                .in_("dish_id", list(customized_dish_ids))
+                .execute()
+                .data
+                or []
+            )
+        for r in di_rows:
+            did = r.get("dish_id")
+            if did:
+                if did not in di_by_dish:
+                    di_by_dish[did] = []
+                di_by_dish[did].append(r)
 
     # Process each item
     for idx, item in enumerate(items):
@@ -521,8 +575,8 @@ def _resolve_ingredient_customizations(
                 f"dish {item.dish_id}: max {max_extras} extra ingredients allowed, got {len(added)}"
             )
 
-        # Fetch dish_ingredients for validation
-        di_rows = get_client().table("dish_ingredients").select("ingredient_id, present, can_remove, discount_price").eq("dish_id", item.dish_id).execute().data or []
+        # Get pre-fetched dish_ingredients for this dish
+        di_rows = di_by_dish.get(item.dish_id) or []
         dish_ingredient_map: dict[str, dict] = {
             r["ingredient_id"]: r for r in di_rows
         }

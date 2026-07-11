@@ -78,7 +78,12 @@ def redsys_initiate(request: Request, body: RedsysInitiateBody, _principal: None
             content={"data": None, "error": "orderId, items and method are required"},
         )
     try:
-        result = svc.initiate_redsys(body.orderId, body.items, body.method, body.urlOk, body.urlKo)
+        from urllib.parse import quote
+        base_url = str(request.base_url).rstrip('/')
+        # Wrap URL OK and KO through the backend to avoid Vercel static route POST 405 error
+        wrapped_url_ok = f"{base_url}/payments/redsys-return-ok?redirect_url={quote(body.urlOk)}"
+        wrapped_url_ko = f"{base_url}/payments/redsys-return-ko?redirect_url={quote(body.urlKo)}"
+        result = svc.initiate_redsys(body.orderId, body.items, body.method, wrapped_url_ok, wrapped_url_ko)
         log_event(LogFactory.payment_event(
             "redsys_initiated", body.orderId, 0, body.method,
         ))
@@ -91,6 +96,22 @@ def redsys_initiate(request: Request, body: RedsysInitiateBody, _principal: None
             error=str(e),
         ))
         return JSONResponse(status_code=500, content={"data": None, "error": "Internal server error"})
+
+
+@router.post("/payments/redsys-return-ok")
+@router.get("/payments/redsys-return-ok")
+def redsys_return_ok(redirect_url: str):
+    """Handle Redsys success return. Redirects the browser using GET 303 to the frontend."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(redirect_url, status_code=303)
+
+
+@router.post("/payments/redsys-return-ko")
+@router.get("/payments/redsys-return-ko")
+def redsys_return_ko(redirect_url: str):
+    """Handle Redsys cancellation/error return. Redirects the browser using GET 303 to the frontend."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(redirect_url, status_code=303)
 
 
 @router.post("/payments/mock-confirm/{order_number}")

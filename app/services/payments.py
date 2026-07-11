@@ -357,10 +357,19 @@ def create_payment(
         if order:
             by_id = {i.id: i for i in order.items}
             for sel in covered_items:
-                item = by_id.get(sel.itemId)
+                if isinstance(sel, dict):
+                    sel_item_id = sel.get("itemId") or sel.get("item_id")
+                    sel_portions = sel.get("portions", 1)
+                else:
+                    sel_item_id = getattr(sel, "itemId", None) or getattr(sel, "item_id", None)
+                    sel_portions = getattr(sel, "portions", 1)
+
+                if not sel_item_id:
+                    continue
+                item = by_id.get(sel_item_id)
                 if item:
                     remaining = item.split_portions - item.paid_portions
-                    portions = max(1, sel.portions)
+                    portions = max(1, int(sel_portions))
                     if portions > remaining:
                         portions = remaining
                     covered.append({"item_id": item.id, "portions": portions})
@@ -379,4 +388,64 @@ def create_payment(
     inserted = get_client().table("payments").insert(row).execute().data
     if not inserted:
         raise RuntimeError("failed to create payment")
-    return Payment(**inserted[0])
+
+    payment_record = Payment(**inserted[0])
+
+    # Update paid portions and status for covered items in DB
+    if covered:
+        for ci in covered:
+            item_id = ci.get("item_id")
+            portions = max(1, int(ci.get("portions", 1)))
+            if not item_id:
+                continue
+
+            item_rows = (
+                get_client()
+                .table("order_items")
+                .select("id, split_portions, paid_portions, payment_status")
+                .eq("id", item_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not item_rows:
+                continue
+
+            item = item_rows[0]
+            split = max(1, int(item.get("split_portions") or 1))
+            already_paid = (
+                split if item.get("payment_status") == "paid"
+                else int(item.get("paid_portions") or 0)
+            )
+            new_paid = min(split, already_paid + portions)
+            new_status = "paid" if new_paid >= split else "unassigned"
+
+            get_client().table("order_items").update({
+                "paid_portions": new_paid,
+                "payment_status": new_status,
+            }).eq("id", item_id).execute()
+
+    # Recalculate amount_paid for the order
+    all_confirmed = (
+        get_client()
+        .table("payments")
+        .select("amount")
+        .eq("order_id", order_id)
+        .eq("status", "confirmed")
+        .execute()
+        .data
+        or []
+    )
+    total_paid = _round2(sum(float(p["amount"]) for p in all_confirmed))
+    get_client().table("orders").update({
+        "amount_paid": total_paid,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", order_id).execute()
+
+    # Auto-close order if fully paid
+    from app.services.orders import _maybe_close_order  # avoid circular import
+    _maybe_close_order(order_id)
+
+    return payment_record
+
