@@ -115,11 +115,32 @@ def update_kitchen_status(request: Request, item_id: str, body: KitchenStatusBod
             if tenant_features.get("waiter_ready_notifications", False):
                 dish_name = item_ctx.get("dish_name", "Plat")
                 table_num = item_ctx.get("order", {}).get("table_number", "?")
+                
+                # Check if this item is kitchen or bar
+                category_id = item_ctx.get("category_id")
+                requires_kitchen = True
+                if category_id:
+                    cat_rows = (
+                        supabase.get_client()
+                        .table("categories")
+                        .select("requires_kitchen")
+                        .eq("id", category_id)
+                        .limit(1)
+                        .execute()
+                        .data
+                        or []
+                    )
+                    if cat_rows:
+                        requires_kitchen = cat_rows[0].get("requires_kitchen", True)
+
+                title = "notifications.dish_ready_title" if requires_kitchen else "notifications.drink_ready_title"
+                description = "notifications.dish_ready_desc" if requires_kitchen else "notifications.drink_ready_desc"
+
                 from app.services.notifications import broadcast_notification
                 broadcast_notification(
                     tenant_id=tenant_id,
-                    title="notifications.dish_ready_title",
-                    description="notifications.dish_ready_desc",
+                    title=title,
+                    description=description,
                     notification_type="order_ready",
                     params={"dish": dish_name, "table": str(table_num), "item_id": item_id},
                 )

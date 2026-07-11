@@ -238,7 +238,7 @@ def get_order_item_context(item_id: str) -> dict[str, Any] | None:
     rows = (
         get_client()
         .table("order_items")
-        .select("id,order_id,dish_id,dish_name,dish_price,quantity,kitchen_status,payment_status,order:orders(id,tenant_id,table_id,table_number,status,total)")
+        .select("id,order_id,dish_id,category_id,dish_name,dish_price,quantity,kitchen_status,payment_status,order:orders(id,tenant_id,table_id,table_number,status,total)")
         .eq("id", item_id)
         .limit(1)
         .execute()
@@ -254,7 +254,7 @@ def get_order_items_context(item_ids: list[str]) -> list[dict[str, Any]]:
     rows = (
         get_client()
         .table("order_items")
-        .select("id,order_id,dish_id,dish_name,dish_price,quantity,kitchen_status,payment_status,order:orders(id,tenant_id,table_id,table_number,status,total)")
+        .select("id,order_id,dish_id,category_id,dish_name,dish_price,quantity,kitchen_status,payment_status,order:orders(id,tenant_id,table_id,table_number,status,total)")
         .in_("id", item_ids)
         .execute()
         .data

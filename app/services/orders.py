@@ -662,11 +662,8 @@ def _build_and_insert_items(
 
     rows = []
     for idx, item in enumerate(items):
-        # Determine kitchen_status based on category's requires_kitchen flag
-        if item.category_id and item.category_id in kitchen_map:
-            kitchen_status = "pending" if kitchen_map[item.category_id] else None
-        else:
-            kitchen_status = "pending"
+        # Both kitchen and bar items start as "pending"
+        kitchen_status = "pending"
 
         # Use resolved price if available, otherwise keep frontend price
         dish_price = resolved_prices.get(idx, item.dish_price)
