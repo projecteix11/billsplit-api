@@ -119,6 +119,7 @@ class DailyMenu(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     sections: list[DailyMenuSection] = []
+    schedule_restriction: Optional[dict] = None
 
 
 class CreateDailyMenuBody(BaseModel):
@@ -126,6 +127,7 @@ class CreateDailyMenuBody(BaseModel):
     description: Optional[str] = None
     price: float
     allow_two_first_courses: Optional[bool] = False
+    schedule_restriction: Optional[dict] = None
 
 
 class UpdateDailyMenuBody(BaseModel):
@@ -134,6 +136,7 @@ class UpdateDailyMenuBody(BaseModel):
     price: Optional[float] = None
     is_active: Optional[bool] = None
     allow_two_first_courses: Optional[bool] = None
+    schedule_restriction: Optional[dict] = None
 
 
 class CreateDailyMenuSectionBody(BaseModel):
