@@ -168,6 +168,108 @@ class TestUpdateKitchenStatus:
         assert resp.status_code == 500
         assert resp.json()["data"] is None
 
+    def test_update_kitchen_status_waiter_blocks_invalid_status_or_source(self, client: TestClient):
+        # Current status is 'cooking' (waiter cannot transition from cooking)
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "waiter")):
+            with patch("app.routers.order_items.activity_svc.get_order_item_context", return_value={"kitchen_status": "cooking"}):
+                resp = client.patch(
+                    "/order-items/item-1/kitchen-status",
+                    json={"status": "delivered"},
+                    headers=_auth_headers(),
+                )
+        assert resp.status_code == 403
+        assert "Waiters can only" in resp.json()["error"]
+
+    def test_update_kitchen_status_waiter_allows_delivered_when_ready(self, client: TestClient):
+        # Current status is 'ready', target is 'delivered'
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),  # _assert_item_owner
+        ] + [MagicMock(data=None)] * 10
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "waiter")):
+            with patch("app.routers.order_items.activity_svc.get_order_item_context", return_value={"kitchen_status": "ready"}):
+                with patch("app.services.orders.get_client", return_value=mock_q):
+                    resp = client.patch(
+                        "/order-items/item-1/kitchen-status",
+                        json={"status": "delivered"},
+                        headers=_auth_headers(),
+                    )
+        assert resp.status_code == 200
+
+    def test_update_kitchen_status_kitchen_blocks_delivered_or_cancelled(self, client: TestClient):
+        # Kitchen cannot set to 'delivered'
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "kitchen")):
+            with patch("app.routers.order_items.activity_svc.get_order_item_context", return_value={"kitchen_status": "cooking"}):
+                resp = client.patch(
+                    "/order-items/item-1/kitchen-status",
+                    json={"status": "delivered"},
+                    headers=_auth_headers(),
+                )
+        assert resp.status_code == 403
+        assert "Kitchen staff can only" in resp.json()["error"]
+
+    def test_update_kitchen_status_kitchen_blocks_modifying_delivered_or_cancelled(self, client: TestClient):
+        # Current status is 'delivered', kitchen attempts to set back to 'ready'
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "kitchen")):
+            with patch("app.routers.order_items.activity_svc.get_order_item_context", return_value={"kitchen_status": "delivered"}):
+                resp = client.patch(
+                    "/order-items/item-1/kitchen-status",
+                    json={"status": "ready"},
+                    headers=_auth_headers(),
+                )
+        assert resp.status_code == 403
+        assert "Kitchen staff cannot modify items that are already" in resp.json()["error"]
+
+    def test_update_kitchen_status_triggers_notification_when_enabled(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),  # 1. _assert_item_owner
+            MagicMock(data=None),          # 2. update order_items
+            MagicMock(data=None),          # 3. get_order_by_id in _sync
+            MagicMock(data=[{"features": {"waiter_ready_notifications": True}}]),  # 4. select features
+        ] + [MagicMock(data=None)] * 10
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+            with patch("app.routers.order_items.activity_svc.get_order_item_context", return_value={"kitchen_status": "cooking", "dish_name": "Pizza", "order": {"table_number": 5}}):
+                with patch("app.services.orders.get_client", return_value=mock_q):
+                    with patch("app.db.supabase.get_client", return_value=mock_q):
+                        with patch("app.services.notifications.broadcast_notification") as mock_broadcast:
+                            resp = client.patch(
+                                "/order-items/item-1/kitchen-status",
+                                json={"status": "ready"},
+                                headers=_auth_headers(),
+                            )
+                            assert resp.status_code == 200
+                            mock_broadcast.assert_called_once_with(
+                                tenant_id=VALID_TENANT_ID,
+                                title="notifications.dish_ready_title",
+                                description="notifications.dish_ready_desc",
+                                notification_type="order_ready",
+                                params={"dish": "Pizza", "table": "5", "item_id": "item-1"},
+                            )
+
+    def test_update_kitchen_status_does_not_trigger_when_disabled(self, client: TestClient):
+        mock_q = make_mock_client()
+        mock_q.execute.side_effect = [
+            MagicMock(data=_owner_row()),  # 1. _assert_item_owner
+            MagicMock(data=None),          # 2. update order_items
+            MagicMock(data=None),          # 3. get_order_by_id in _sync
+            MagicMock(data=[{"features": {"waiter_ready_notifications": False}}]),  # 4. select features
+        ] + [MagicMock(data=None)] * 10
+        with patch("app.db.supabase.verify_token_full", return_value=(VALID_USER_ID, VALID_TENANT_ID, "developer")):
+            with patch("app.routers.order_items.activity_svc.get_order_item_context", return_value={"kitchen_status": "cooking", "dish_name": "Pizza", "order": {"table_number": 5}}):
+                with patch("app.services.orders.get_client", return_value=mock_q):
+                    with patch("app.db.supabase.get_client", return_value=mock_q):
+                        with patch("app.services.notifications.broadcast_notification") as mock_broadcast:
+                            resp = client.patch(
+                                "/order-items/item-1/kitchen-status",
+                                json={"status": "ready"},
+                                headers=_auth_headers(),
+                            )
+                            assert resp.status_code == 200
+                            mock_broadcast.assert_not_called()
+
+
+
 
 # ---------------------------------------------------------------------------
 # PATCH /api/order-items/payment-status
