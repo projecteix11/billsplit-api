@@ -67,23 +67,51 @@ class TestSupabaseInit:
 # verify_token() and verify_token_full()
 # ---------------------------------------------------------------------------
 
+def _fluent(data):
+    """A MagicMock supabase query builder whose terminal .execute().data is `data`."""
+    q = MagicMock()
+    q.select.return_value = q
+    q.eq.return_value = q
+    q.limit.return_value = q
+    q.execute.return_value.data = data
+    return q
+
+
 class TestVerifyToken:
-    def _make_sb(self):
+    def _make_sb(self, user=None, user_roles=None, platform_admin=False):
+        """Build app.db.supabase with a table-name-aware client mock.
+
+        `user` is the object returned by auth.get_user().user. `user_roles` is the
+        data returned for the user_roles query; `platform_admin` controls whether the
+        platform_admins query returns a membership row.
+        """
         import app.db.supabase as sb
         sb._base_url = "http://test.local"
         sb._api_key = "test-key"
-        sb._client = MagicMock()
+        client = MagicMock()
+        client.auth.get_user.return_value.user = user
+
+        def table(name):
+            if name == "user_roles":
+                return _fluent(user_roles or [])
+            if name == "platform_admins":
+                return _fluent([{"user_id": getattr(user, "id", "")}] if platform_admin else [])
+            return _fluent([])
+
+        client.table.side_effect = table
+        sb._client = client
+        sb._TOKEN_CACHE.clear()
         return sb
 
+    def _user(self, uid, user_metadata=None, app_metadata=None):
+        u = MagicMock()
+        u.id = uid
+        u.user_metadata = user_metadata or {}
+        u.app_metadata = app_metadata or {}
+        return u
+
     def test_verify_token_returns_user_id_on_success(self):
-        sb = self._make_sb()
-        mock_user = MagicMock()
-        mock_user.id = "user-uuid-abc"
-        sb._client.auth.get_user.return_value.user = mock_user
-
-        # verify_token_full needs a tenant lookup too — give it an empty result
-        sb._client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
-
+        sb = self._make_sb(user=self._user("user-uuid-abc"))
         user_id = sb.verify_token("valid-token")
         assert user_id == "user-uuid-abc"
 
@@ -94,64 +122,78 @@ class TestVerifyToken:
             sb.verify_token("bad-token")
 
     def test_verify_token_raises_when_user_is_none(self):
-        sb = self._make_sb()
-        sb._client.auth.get_user.return_value.user = None
+        sb = self._make_sb(user=None)
         with pytest.raises(ValueError):
             sb.verify_token("token-no-user")
 
-    def test_verify_token_full_developer_returns_empty_tenant(self):
-        """Developer role: tenant_id is always "" (no DB lookup)."""
-        sb = self._make_sb()
-        mock_user = MagicMock()
-        mock_user.id = "dev-uuid"
-        mock_user.user_metadata = {"role": "developer"}
-        mock_user.app_metadata = {}
-        sb._client.auth.get_user.return_value.user = mock_user
-
-        # Clear cache so the token isn't served from cache
-        sb._TOKEN_CACHE.clear()
-
+    def test_verify_token_full_platform_admin_is_developer(self):
+        """A platform_admins member resolves to role=developer with no tenant —
+        regardless of what user_metadata claims."""
+        sb = self._make_sb(
+            user=self._user("dev-uuid", user_metadata={"role": "waiter"}),
+            platform_admin=True,
+        )
         user_id, tenant_id, role = sb.verify_token_full("dev-token")
         assert user_id == "dev-uuid"
         assert tenant_id == ""
         assert role == "developer"
 
-    def test_verify_token_full_non_developer_reads_user_roles(self):
-        """Non-developer: tenant_id and role come from user_roles table."""
-        sb = self._make_sb()
-        mock_user = MagicMock()
-        mock_user.id = "admin-uuid"
-        mock_user.user_metadata = {}
-        mock_user.app_metadata = {}
-        sb._client.auth.get_user.return_value.user = mock_user
-
-        # Fluent builder for user_roles table
-        mock_q = MagicMock()
-        mock_q.table.return_value = mock_q
-        mock_q.select.return_value = mock_q
-        mock_q.eq.return_value = mock_q
-        mock_q.limit.return_value = mock_q
-        mock_q.execute.return_value.data = [{"tenant_id": "tenant-xyz", "role": "admin"}]
-        sb._client = mock_q
-        # Re-patch auth on the new mock
-        auth_mock = MagicMock()
-        auth_user_mock = MagicMock()
-        auth_user_mock.id = "admin-uuid"
-        auth_user_mock.user_metadata = {}
-        auth_user_mock.app_metadata = {}
-        auth_mock.get_user.return_value.user = auth_user_mock
-        mock_q.auth = auth_mock
-
-        sb._TOKEN_CACHE.clear()
-
+    def test_verify_token_full_staff_reads_user_roles(self):
+        """Staff: tenant_id and role come from the user_roles table."""
+        sb = self._make_sb(
+            user=self._user("admin-uuid"),
+            user_roles=[{"tenant_id": "tenant-xyz", "role": "admin"}],
+        )
         user_id, tenant_id, role = sb.verify_token_full("admin-token")
         assert user_id == "admin-uuid"
         assert tenant_id == "tenant-xyz"
         assert role == "admin"
 
+    def test_verify_token_full_ignores_self_editable_metadata_role(self):
+        """XC-2 escalation guard: a self-registered user who sets
+        user_metadata.role=admin + tenant_id=<victim> and has NO user_roles row
+        must resolve as an unprivileged 'user' with no tenant — metadata is never
+        trusted for authorization."""
+        sb = self._make_sb(
+            user=self._user(
+                "attacker-uuid",
+                user_metadata={"role": "admin", "tenant_id": "victim-tenant"},
+            ),
+            user_roles=[],
+            platform_admin=False,
+        )
+        user_id, tenant_id, role = sb.verify_token_full("attacker-token")
+        assert user_id == "attacker-uuid"
+        assert tenant_id == ""
+        assert role == "user"
+
+    def test_verify_token_full_ignores_self_editable_developer_role(self):
+        """A user claiming role=developer in user_metadata but absent from
+        platform_admins must NOT be granted the developer role."""
+        sb = self._make_sb(
+            user=self._user("wannabe-uuid", user_metadata={"role": "developer"}),
+            user_roles=[],
+            platform_admin=False,
+        )
+        _, tenant_id, role = sb.verify_token_full("wannabe-token")
+        assert tenant_id == ""
+        assert role == "user"
+
+    def test_verify_token_full_staff_role_overrides_metadata(self):
+        """Even if metadata claims a higher tenant/role, the user_roles row wins."""
+        sb = self._make_sb(
+            user=self._user(
+                "staff-uuid",
+                user_metadata={"role": "admin", "tenant_id": "other-tenant"},
+            ),
+            user_roles=[{"tenant_id": "real-tenant", "role": "waiter"}],
+        )
+        _, tenant_id, role = sb.verify_token_full("staff-token")
+        assert tenant_id == "real-tenant"
+        assert role == "waiter"
+
     def test_verify_token_full_raises_on_exception(self):
         sb = self._make_sb()
         sb._client.auth.get_user.side_effect = Exception("bad token")
-        sb._TOKEN_CACHE.clear()
         with pytest.raises(ValueError):
             sb.verify_token_full("bad-token-unique-99")

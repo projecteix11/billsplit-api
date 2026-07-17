@@ -84,7 +84,16 @@ def is_platform_admin(user_id: str) -> bool:
 
 
 def verify_token_full(token: str) -> tuple[str, str, str]:
-    """Verify token and return (user_id, tenant_id, role). Result is cached for 2 minutes."""
+    """Verify token and return (user_id, tenant_id, role). Result is cached for 2 minutes.
+
+    Authorization signals (role, tenant_id) are derived ONLY from server-controlled
+    sources: the user_roles table and platform_admins membership. user_metadata is
+    self-editable by the user via GoTrue (auth.updateUser), so it is never trusted
+    here for role or tenant — doing so let a self-registered user grant themselves
+    staff/developer privileges on an arbitrary tenant (Master Ecosystem Report XC-2).
+    A principal with no enabled user_roles row and no platform_admins membership is
+    unprivileged: role "user", no tenant.
+    """
     cached = _TOKEN_CACHE.get(token)
     if cached and time.monotonic() < cached[3]:
         return cached[0], cached[1], cached[2]
@@ -100,14 +109,9 @@ def verify_token_full(token: str) -> tuple[str, str, str]:
         raise ValueError("invalid token: no user id")
 
     user_id = str(user.id)
-    meta = user.user_metadata or {}
-    app_meta = user.app_metadata or {}
-    role = str(meta.get("role", "") or app_meta.get("role", ""))
 
-    if role == "developer":
-        _TOKEN_CACHE[token] = (user_id, "", role, time.monotonic() + _TOKEN_CACHE_TTL)
-        return user_id, "", role
-
+    # Staff: role + tenant come from an enabled user_roles row (authoritative).
+    # Checked first because it is the common case and a single query.
     rows = (
         get_client()
         .table("user_roles")
@@ -120,9 +124,15 @@ def verify_token_full(token: str) -> tuple[str, str, str]:
     )
     if rows:
         tenant_id = str(rows[0].get("tenant_id", ""))
-        role = str(rows[0].get("role", role))
+        role = str(rows[0].get("role", "") or "user")
+    elif is_platform_admin(user_id):
+        # Platform admins operate across the platform and have no tenant.
+        tenant_id = ""
+        role = "developer"
     else:
-        tenant_id = str(meta.get("tenant_id", "") or app_meta.get("tenant_id", ""))
+        # Unprivileged authenticated principal (e.g. a self-registered diner).
+        tenant_id = ""
+        role = "user"
 
     _TOKEN_CACHE[token] = (user_id, tenant_id, role, time.monotonic() + _TOKEN_CACHE_TTL)
     return user_id, tenant_id, role
