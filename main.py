@@ -60,10 +60,26 @@ cors_origins = [
     o.strip()
     for o in os.getenv("CORS_ORIGINS", "http://localhost:4173,http://localhost:5173,http://localhost:5174").split(",")
 ]
+
+
+def cors_origin_regex(is_local: bool) -> str:
+    """Allowed-origin regex for CORS.
+
+    Production allows only gobbly.app subdomains. localhost + private LAN ranges
+    (192.168/10.x, for cross-device testing from a dev machine) are added ONLY
+    when APP_ENV=local, so they can never widen the production CORS surface.
+    """
+    prod = r"https://([a-z0-9-]+\.)?gobbly\.app"
+    if is_local:
+        return r"(https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?|" + prod + r")"
+    return prod
+
+
+# Default APP_ENV is "production" (see middleware/rate_limit.py) → safe default.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_origin_regex=r"(https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?|https://([a-z0-9-]+\.)?gobbly\.app)",
+    allow_origin_regex=cors_origin_regex(os.getenv("APP_ENV", "production") == "local"),
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-Id", "X-Client-Type", "X-Correlation-Id", "X-Tenant-Slug", "X-Api-Key", "X-Tenant-Id", "X-Guest-Token"],
     expose_headers=["X-Request-Id"],
