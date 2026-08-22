@@ -22,8 +22,13 @@ router = APIRouter()
 
 
 @router.get("/daily-menus")
-async def get_daily_menus(all: bool = False, tenant_id: str = Depends(require_feature("daily_menus"))):
+async def get_daily_menus(all: bool = False, tenant_id: str = Depends(get_current_tenant)):
     try:
+        from app.middleware.tenant import _get_tenant_features
+        features = _get_tenant_features(tenant_id)
+        if not features.get("daily_menus"):
+            return {"data": [], "error": None}
+
         if all:
             data = svc.get_all_daily_menus(tenant_id)
         else:

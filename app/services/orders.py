@@ -713,3 +713,243 @@ def _build_and_insert_items(
             get_client().table("order_item_ingredients").insert(all_ing_rows).execute()
     else:
         get_client().table("order_items").insert(rows).execute()
+
+
+def _build_and_insert_prepay_items(
+    order_id: str,
+    items: list[NewOrderItem],
+    precomputed: tuple[dict[int, float], dict[int, list[dict]]] | None = None,
+    diner_name: str = "Comensal",
+    notes: Optional[str] = None,
+) -> None:
+    """Build item rows for prepay with payment_status='paid' and kitchen_status='pending'."""
+    if precomputed:
+        resolved_prices, ingredient_rows = precomputed
+    else:
+        resolved_prices, ingredient_rows = _resolve_ingredient_customizations(items)
+
+    rows = []
+    for idx, item in enumerate(items):
+        kitchen_status = "pending"
+        dish_price = resolved_prices.get(idx, item.dish_price)
+
+        enriched_cust = None
+        if item.customization:
+            raw_cust = item.customization.model_dump() if hasattr(item.customization, 'model_dump') else item.customization
+            enriched_cust = _enrich_customization(raw_cust)
+
+        item_notes = item.notes or notes or None
+
+        row = {
+            "order_id": order_id,
+            "dish_name": item.dish_name,
+            "dish_price": dish_price,
+            "quantity": item.quantity,
+            "notes": item_notes,
+            "diner_name": item.diner_name or diner_name or "Comensal",
+            "kitchen_status": kitchen_status,
+            "payment_status": "paid",
+            "split_portions": 1,
+            "paid_portions": 1,
+            "dish_id": item.dish_id or None,
+            "category_id": item.category_id or None,
+            "customization": enriched_cust,
+            "original_price": item.original_price,
+            "price_override_reason": item.price_override_reason,
+            "source": item.source or "customer",
+        }
+        rows.append(row)
+
+    if ingredient_rows:
+        inserted = get_client().table("order_items").insert(rows).execute().data
+        if not inserted:
+            raise RuntimeError("failed to insert prepay order items")
+
+        all_ing_rows: list[dict] = []
+        for idx, ing_list in ingredient_rows.items():
+            order_item_id = inserted[idx]["id"]
+            for ing in ing_list:
+                all_ing_rows.append({
+                    "order_item_id": order_item_id,
+                    "ingredient_id": ing["ingredient_id"],
+                    "action": ing["action"],
+                })
+
+        if all_ing_rows:
+            get_client().table("order_item_ingredients").insert(all_ing_rows).execute()
+    else:
+        get_client().table("order_items").insert(rows).execute()
+
+
+def create_prepay_order(
+    table_id: str,
+    table_number: int,
+    items: list[NewOrderItem],
+    payment_method: str,
+    tenant_id: str = "",
+    diner_name: str = "Comensal",
+    customer_email: Optional[str] = None,
+    customer_phone: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> tuple[Order, str, str, Optional[str]]:
+    """Creates or updates an order with immediate pre-payment and dispatches items to kitchen.
+
+    Returns: (order, tracking_code, tracking_url, payment_id)
+    """
+    precomputed = _resolve_ingredient_customizations(items)
+    resolved_prices = precomputed[0]
+    subtotal = _calculate_subtotal(items, resolved_prices)
+    tax_amount = _calculate_tax(subtotal)
+    total = _round2(subtotal + tax_amount)
+
+    existing = get_open_order_for_table(table_id)
+
+    if existing:
+        order_id = existing.id
+        _build_and_insert_prepay_items(
+            order_id, items, precomputed=precomputed, diner_name=diner_name, notes=notes
+        )
+        if tenant_id:
+            stock_svc.deduct_stock_for_items(items, tenant_id)
+
+        refreshed = get_order_by_id(order_id)
+        if refreshed is None:
+            raise RuntimeError("failed to refresh existing order")
+
+        new_subtotal = _calculate_subtotal_from_items(refreshed.items)
+        new_tax = _calculate_tax(new_subtotal)
+        new_total = _round2(new_subtotal + new_tax)
+        new_amount_paid = _round2(float(existing.subtotal + existing.tax_amount if existing.total is None else existing.total) + total)
+
+        get_client().table("orders").update({
+            "subtotal": new_subtotal,
+            "tax_amount": new_tax,
+            "total": new_total,
+            "amount_paid": new_amount_paid,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", order_id).execute()
+
+        get_client().table("restaurant_tables").update({"status": "in_kitchen"}).eq("id", table_id).execute()
+        order = get_order_by_id(order_id)
+    else:
+        order_row = {
+            "table_id": table_id,
+            "table_number": table_number,
+            "status": "open",
+            "subtotal": subtotal,
+            "tax_amount": tax_amount,
+            "total": total,
+            "amount_paid": total,
+            "tenant_id": tenant_id,
+        }
+        inserted = get_client().table("orders").insert(order_row).execute().data
+        if not inserted:
+            raise RuntimeError("failed to create prepay order")
+        order = Order(**_attach_table_label(inserted[0]))
+        order_id = order.id
+
+        _build_and_insert_prepay_items(
+            order_id, items, precomputed=precomputed, diner_name=diner_name, notes=notes
+        )
+        if tenant_id:
+            stock_svc.deduct_stock_for_items(items, tenant_id)
+        get_client().table("restaurant_tables").update(
+            {"status": "in_kitchen", "active_order_id": order_id}
+        ).eq("id", table_id).execute()
+        order = get_order_by_id(order_id)
+
+    if order is None:
+        raise RuntimeError("failed to retrieve finalized prepay order")
+
+    tracking_code = f"GOB-{order.id[:6].upper()}"
+    tracking_url = f"/track/{tracking_code}"
+
+    # Insert payment record
+    payment_row = {
+        "order_id": order.id,
+        "amount": total,
+        "tip_amount": 0.0,
+        "total_charged": total,
+        "payment_method": payment_method or "card",
+        "status": "confirmed",
+        "reference": f"PREPAY-{tracking_code}",
+    }
+    payment_res = get_client().table("payments").insert(payment_row).execute().data
+    payment_id = payment_res[0]["id"] if payment_res else None
+
+    return order, tracking_code, tracking_url, payment_id
+
+
+def get_order_tracking(tracking_code: str) -> dict | None:
+    """Lookup order details by tracking code (e.g. GOB-A1B2C3 or order UUID)."""
+    raw_code = tracking_code.strip().upper()
+    if raw_code.startswith("GOB-"):
+        hex_prefix = raw_code[4:].lower()
+    else:
+        hex_prefix = raw_code.lower()
+
+    client = get_client()
+    if len(hex_prefix) == 36 and "-" in hex_prefix:
+        rows = client.table("orders").select("*, items:order_items(*), restaurant_tables(label, number)").eq("id", hex_prefix).execute().data or []
+    else:
+        # PostgreSQL UUID cannot be filtered with ILIKE in PostgREST, use hexadecimal range
+        clean_prefix = "".join(c for c in hex_prefix if c in "0123456789abcdef")
+        start_uuid = (clean_prefix.ljust(8, "0") + "-0000-0000-0000-000000000000")[:36]
+        end_uuid = (clean_prefix.ljust(8, "f") + "-ffff-ffff-ffff-ffffffffffff")[:36]
+        rows = client.table("orders").select("*, items:order_items(*), restaurant_tables(label, number)").gte("id", start_uuid).lte("id", end_uuid).order("created_at", desc=True).limit(1).execute().data or []
+
+    if not rows:
+        return None
+
+    order_row = _attach_table_label(rows[0])
+    order = Order(**order_row)
+
+    tenant_name = ""
+    tenant_slug = ""
+    if order.tenant_id:
+        t_rows = client.table("tenants").select("name, slug").eq("id", order.tenant_id).limit(1).execute().data or []
+        if t_rows:
+            tenant_name = t_rows[0].get("name", "")
+            tenant_slug = t_rows[0].get("slug", "")
+
+    total_items = len(order.items)
+    pending_items = sum(1 for i in order.items if i.kitchen_status == "pending")
+    cooking_items = sum(1 for i in order.items if i.kitchen_status == "cooking")
+    ready_items = sum(1 for i in order.items if i.kitchen_status == "ready")
+    delivered_items = sum(1 for i in order.items if i.kitchen_status == "delivered")
+
+    if order.status == "closed" or (total_items > 0 and delivered_items == total_items):
+        overall_stage = "delivered"
+    elif ready_items > 0 and (ready_items + delivered_items == total_items):
+        overall_stage = "ready"
+    elif cooking_items > 0 or ready_items > 0:
+        overall_stage = "cooking"
+    elif pending_items > 0:
+        overall_stage = "in_kitchen"
+    else:
+        overall_stage = "received"
+
+    return {
+        "order_id": order.id,
+        "tracking_code": f"GOB-{order.id[:6].upper()}",
+        "table_id": order.table_id,
+        "table_number": order.table_number,
+        "table_label": order.table_label,
+        "status": order.status,
+        "subtotal": order.subtotal,
+        "tax_amount": order.tax_amount,
+        "total": order.total,
+        "amount_paid": float(order_row.get("amount_paid") or order.total),
+        "created_at": order.created_at,
+        "updated_at": order.updated_at,
+        "tenant_name": tenant_name,
+        "tenant_slug": tenant_slug,
+        "overall_stage": overall_stage,
+        "total_items": total_items,
+        "pending_items": pending_items,
+        "cooking_items": cooking_items,
+        "ready_items": ready_items,
+        "delivered_items": delivered_items,
+        "items": [i.model_dump() for i in order.items],
+    }
+

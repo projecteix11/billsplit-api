@@ -7,13 +7,105 @@ from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth, require_customer_principal
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import get_current_tenant
-from app.models import CreateOrderBody, AddItemsBody
+from app.models import CreateOrderBody, AddItemsBody, PrePayCheckoutBody, PrePayCheckoutResponse, OrderTrackingResponse
 from app.db.supabase import get_client
 from app.services import activity as activity_svc
 from app.services import orders as svc
 from app.http_errors import internal_error
 
 router = APIRouter()
+
+
+@router.post("/orders/pre-payment/checkout", status_code=201)
+@limiter.limit("20/minute")
+async def prepay_checkout(
+    request: Request,
+    body: PrePayCheckoutBody,
+    tenant_id: str = Depends(get_current_tenant),
+    _principal: None = Depends(require_customer_principal),
+):
+    if not body.tableId or not body.tableNumber or not body.items:
+        return JSONResponse(
+            status_code=400,
+            content={"data": None, "error": "tableId, tableNumber and items[] are required"},
+        )
+    try:
+        order, tracking_code, tracking_url, payment_id = svc.create_prepay_order(
+            table_id=body.tableId,
+            table_number=body.tableNumber,
+            items=body.items,
+            payment_method=body.paymentMethod,
+            tenant_id=tenant_id,
+            diner_name=body.dinerName or "Comensal",
+            customer_email=body.customerEmail,
+            customer_phone=body.customerPhone,
+            notes=body.notes,
+        )
+        log_event(LogFactory.order_lifecycle(
+            "prepay_order_created", order.id,
+            table_id=body.tableId,
+            metadata={
+                "table_number": body.tableNumber,
+                "item_count": len(body.items),
+                "tracking_code": tracking_code,
+                "payment_method": body.paymentMethod,
+            },
+        ))
+        activity_svc.record_table_opened(
+            request=request,
+            tenant_id=tenant_id,
+            order_id=order.id,
+            table_id=body.tableId,
+            table_number=body.tableNumber,
+        )
+        activity_svc.record_items_added(
+            request=request,
+            tenant_id=tenant_id,
+            order_id=order.id,
+            table_id=body.tableId,
+            table_number=body.tableNumber,
+            items=body.items,
+        )
+        activity_svc.record_payment_created(
+            request=request,
+            tenant_id=tenant_id,
+            order=order.model_dump(),
+            order_id=order.id,
+            amount=order.total,
+            method=body.paymentMethod,
+        )
+        return JSONResponse(
+            status_code=201,
+            content={
+                "data": {
+                    "order": order.model_dump(),
+                    "tracking_code": tracking_code,
+                    "tracking_url": tracking_url,
+                    "payment_id": payment_id,
+                },
+                "error": None,
+            },
+        )
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"data": None, "error": str(e)})
+    except Exception as e:
+        log_event(LogFactory.order_lifecycle(
+            "prepay_order_create_failed", "",
+            table_id=body.tableId,
+            metadata={"error": str(e), "traceback": traceback.format_exc()[-500:]},
+        ))
+        return internal_error(e)
+
+
+@router.get("/orders/track/{tracking_code}")
+def track_order(tracking_code: str):
+    try:
+        tracking_data = svc.get_order_tracking(tracking_code)
+        if not tracking_data:
+            return JSONResponse(status_code=404, content={"data": None, "error": "Comanda no trobada"})
+        return {"data": tracking_data, "error": None}
+    except Exception as e:
+        return internal_error(e)
 
 
 @router.post("/orders", status_code=201)

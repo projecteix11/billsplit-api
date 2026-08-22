@@ -307,6 +307,48 @@ class CreatePaymentBody(BaseModel):
     coveredItems: Optional[list[RedsysInitiateItem]] = None
 
 
+class PrePayCheckoutBody(BaseModel):
+    tableId: str
+    tableNumber: int
+    items: list[NewOrderItem]
+    paymentMethod: str = "card"
+    dinerName: Optional[str] = "Comensal"
+    customerEmail: Optional[str] = None
+    customerPhone: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class PrePayCheckoutResponse(BaseModel):
+    order: Order
+    tracking_code: str
+    tracking_url: str
+    payment_id: Optional[str] = None
+
+
+class OrderTrackingResponse(BaseModel):
+    order_id: str
+    tracking_code: str
+    table_id: str
+    table_number: int
+    table_label: Optional[str] = None
+    status: str
+    subtotal: float
+    tax_amount: float
+    total: float
+    amount_paid: float
+    created_at: str
+    updated_at: str
+    tenant_name: Optional[str] = None
+    tenant_slug: Optional[str] = None
+    overall_stage: str = "received"
+    total_items: int = 0
+    pending_items: int = 0
+    cooking_items: int = 0
+    ready_items: int = 0
+    delivered_items: int = 0
+    items: list[OrderItem] = []
+
+
 class ActivityEvent(BaseModel):
     id: str
     tenant_id: str
