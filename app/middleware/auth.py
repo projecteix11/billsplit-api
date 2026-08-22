@@ -48,8 +48,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
             try:
                 user_id, tenant_id, role = supabase.verify_token_full(token)
                 request.state.user_id = user_id
-                request.state.tenant_id = tenant_id
                 request.state.role = role
+                if role == "developer":
+                    dev_tenant_id = request.headers.get("X-Tenant-Id")
+                    if dev_tenant_id:
+                        request.state.tenant_id = dev_tenant_id
+                    else:
+                        dev_slug = request.headers.get("X-Tenant-Slug")
+                        from app.middleware.tenant import _resolve_slug
+                        request.state.tenant_id = _resolve_slug(dev_slug) if dev_slug else None
+                else:
+                    request.state.tenant_id = tenant_id
             except Exception:
                 log_event(LogFactory.auth_event(
                     "auth_token_invalid",

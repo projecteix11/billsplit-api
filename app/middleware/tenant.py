@@ -66,13 +66,35 @@ async def get_current_tenant(request: Request) -> str:
       5. Origin/Referer header → parse slug → DB lookup
       6. 404
     """
+    # 0. Check for developer impersonation: if caller is developer and supplies X-Tenant-Id or X-Tenant-Slug
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            user_id, token_tenant_id, role = verify_token_full(auth_header[7:])
+            if role == "developer":
+                tenant_id_header = request.headers.get("X-Tenant-Id")
+                if tenant_id_header:
+                    request.state.user_id = user_id
+                    request.state.tenant_id = tenant_id_header
+                    request.state.role = role
+                    return tenant_id_header
+                tenant_slug_header = request.headers.get("X-Tenant-Slug")
+                if tenant_slug_header:
+                    resolved = _resolve_slug(tenant_slug_header)
+                    if resolved:
+                        request.state.user_id = user_id
+                        request.state.tenant_id = resolved
+                        request.state.role = role
+                        return resolved
+        except Exception:
+            pass
+
     # 1. Already resolved (auth middleware ran for this route)
     tenant_id = getattr(request.state, "tenant_id", None)
     if tenant_id:
         return tenant_id
 
     # 2. Bearer token present but not yet verified (route outside AuthMiddleware list)
-    auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
             user_id, tenant_id, role = verify_token_full(auth_header[7:])
@@ -100,7 +122,13 @@ async def get_current_tenant(request: Request) -> str:
         except GuestTokenError:
             pass
 
-    # 4. X-Tenant-Slug header → resolve slug against DB
+    # 4. X-Tenant-Id header
+    tenant_id_header = request.headers.get("X-Tenant-Id")
+    if tenant_id_header:
+        request.state.tenant_id = tenant_id_header
+        return tenant_id_header
+
+    # 5. X-Tenant-Slug header → resolve slug against DB
     tenant_slug_header = request.headers.get("X-Tenant-Slug")
     if tenant_slug_header:
         tenant_id = _resolve_slug(tenant_slug_header)

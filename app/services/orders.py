@@ -60,24 +60,20 @@ def _attach_table_label(row: dict) -> dict:
 
 
 def fetch_orders(tenant_id: str, status: str, kitchen_only: bool = False) -> list[Order]:
-    tables = _get_tenant_tables(tenant_id)
-    table_ids = [r["id"] for r in tables]
-    if not table_ids:
-        return []
-    table_labels = {r["id"]: r.get("label") for r in tables if r.get("label")}
+    table_ids = _get_tenant_table_ids(tenant_id)
 
-    q = get_client().table("orders").select("*, items:order_items(*)").eq("status", status).in_("table_id", table_ids)
+    if table_ids:
+        q = get_client().table("orders").select("*, items:order_items(*)").eq("status", status).or_(f"tenant_id.eq.{tenant_id},table_id.in.({','.join(table_ids)})")
+    else:
+        q = get_client().table("orders").select("*, items:order_items(*)").eq("status", status).eq("tenant_id", tenant_id)
+
     if status == "closed":
         q = q.order("updated_at", desc=True).limit(100)
     else:
         q = q.order("created_at", desc=False).limit(1000)
 
     rows = q.execute().data or []
-    for row in rows:
-        label = table_labels.get(row.get("table_id"))
-        if label:
-            row["table_label"] = label
-    orders = [Order(**row) for row in rows]
+    orders = [Order(**_attach_table_label(row)) for row in rows]
 
     if kitchen_only:
         for order in orders:

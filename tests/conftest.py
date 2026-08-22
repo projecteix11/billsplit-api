@@ -48,7 +48,7 @@ def make_mock_client(data=None):
     mock_q = MagicMock()
     for method in [
         "table", "select", "eq", "neq", "gt", "gte", "lt", "lte",
-        "in_", "ilike", "like", "order", "limit", "not_",
+        "in_", "ilike", "like", "order", "limit", "not_", "or_",
         "insert", "update", "delete", "upsert", "filter",
     ]:
         getattr(mock_q, method).return_value = mock_q
