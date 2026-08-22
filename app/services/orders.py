@@ -728,6 +728,12 @@ def _build_and_insert_prepay_items(
     else:
         resolved_prices, ingredient_rows = _resolve_ingredient_customizations(items)
 
+    dish_ids_to_lookup = [i.dish_id for i in items if i.dish_id and not i.category_id]
+    dish_cat_map: dict[str, Optional[str]] = {}
+    if dish_ids_to_lookup:
+        dish_rows = get_client().table("dishes").select("id, category_id").in_("id", dish_ids_to_lookup).execute().data or []
+        dish_cat_map = {d["id"]: d.get("category_id") for d in dish_rows}
+
     rows = []
     for idx, item in enumerate(items):
         kitchen_status = "pending"
@@ -739,6 +745,7 @@ def _build_and_insert_prepay_items(
             enriched_cust = _enrich_customization(raw_cust)
 
         item_notes = item.notes or notes or None
+        cat_id = item.category_id or (dish_cat_map.get(item.dish_id) if item.dish_id else None)
 
         row = {
             "order_id": order_id,
@@ -752,7 +759,7 @@ def _build_and_insert_prepay_items(
             "split_portions": 1,
             "paid_portions": 1,
             "dish_id": item.dish_id or None,
-            "category_id": item.category_id or None,
+            "category_id": cat_id,
             "customization": enriched_cust,
             "original_price": item.original_price,
             "price_override_reason": item.price_override_reason,
@@ -829,7 +836,12 @@ def create_prepay_order(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", order_id).execute()
 
-        get_client().table("restaurant_tables").update({"status": "in_kitchen"}).eq("id", table_id).execute()
+        get_client().table("restaurant_tables").update({
+            "status": "in_kitchen",
+            "active_order_id": order_id,
+            "is_app_used": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", table_id).execute()
         order = get_order_by_id(order_id)
     else:
         order_row = {
@@ -853,9 +865,12 @@ def create_prepay_order(
         )
         if tenant_id:
             stock_svc.deduct_stock_for_items(items, tenant_id)
-        get_client().table("restaurant_tables").update(
-            {"status": "in_kitchen", "active_order_id": order_id}
-        ).eq("id", table_id).execute()
+        get_client().table("restaurant_tables").update({
+            "status": "in_kitchen",
+            "active_order_id": order_id,
+            "is_app_used": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", table_id).execute()
         order = get_order_by_id(order_id)
 
     if order is None:
