@@ -316,6 +316,7 @@ class PrePayCheckoutBody(BaseModel):
     customerEmail: Optional[str] = None
     customerPhone: Optional[str] = None
     notes: Optional[str] = None
+    trackingCode: Optional[str] = None
 
 
 class PrePayCheckoutResponse(BaseModel):
@@ -347,6 +348,7 @@ class OrderTrackingResponse(BaseModel):
     ready_items: int = 0
     delivered_items: int = 0
     items: list[OrderItem] = []
+    payment_id: Optional[str] = None
 
 
 class ActivityEvent(BaseModel):

@@ -794,6 +794,7 @@ def create_prepay_order(
     customer_email: Optional[str] = None,
     customer_phone: Optional[str] = None,
     notes: Optional[str] = None,
+    tracking_code: Optional[str] = None,
 ) -> tuple[Order, str, str, Optional[str]]:
     """Creates or updates an order with immediate pre-payment and dispatches items to kitchen.
 
@@ -805,7 +806,17 @@ def create_prepay_order(
     tax_amount = _calculate_tax(subtotal)
     total = _round2(subtotal + tax_amount)
 
-    existing = get_open_order_for_table(table_id)
+    existing = None
+    if tracking_code:
+        raw_code = tracking_code.strip().upper()
+        hex_prefix = raw_code[4:].lower() if raw_code.startswith("GOB-") else raw_code.lower()
+        clean_prefix = "".join(c for c in hex_prefix if c in "0123456789abcdef")
+        if len(clean_prefix) >= 6:
+            start_uuid = (clean_prefix.ljust(8, "0") + "-0000-0000-0000-000000000000")[:36]
+            end_uuid = (clean_prefix.ljust(8, "f") + "-ffff-ffff-ffff-ffffffffffff")[:36]
+            rows = get_client().table("orders").select("id").eq("table_id", table_id).gte("id", start_uuid).lte("id", end_uuid).order("created_at", desc=True).limit(1).execute().data or []
+            if rows:
+                existing = get_order_by_id(rows[0]["id"])
 
     if existing:
         order_id = existing.id
@@ -931,14 +942,15 @@ def get_order_tracking(tracking_code: str) -> dict | None:
 
     if order.status == "closed" or (total_items > 0 and delivered_items == total_items):
         overall_stage = "delivered"
-    elif ready_items > 0 and (ready_items + delivered_items == total_items):
-        overall_stage = "ready"
     elif cooking_items > 0 or ready_items > 0:
         overall_stage = "cooking"
     elif pending_items > 0:
         overall_stage = "in_kitchen"
     else:
         overall_stage = "received"
+
+    p_rows = client.table("payments").select("id").eq("order_id", order.id).order("created_at", desc=True).limit(1).execute().data or []
+    payment_id = p_rows[0]["id"] if p_rows else None
 
     return {
         "order_id": order.id,
@@ -962,5 +974,6 @@ def get_order_tracking(tracking_code: str) -> dict | None:
         "ready_items": ready_items,
         "delivered_items": delivered_items,
         "items": [i.model_dump() for i in order.items],
+        "payment_id": payment_id,
     }
 

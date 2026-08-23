@@ -40,6 +40,7 @@ async def prepay_checkout(
             customer_email=body.customerEmail,
             customer_phone=body.customerPhone,
             notes=body.notes,
+            tracking_code=body.trackingCode,
         )
         log_event(LogFactory.order_lifecycle(
             "prepay_order_created", order.id,
