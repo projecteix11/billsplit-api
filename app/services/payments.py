@@ -233,7 +233,7 @@ def confirm_redsys_payment(redsys_order_number: str, amount_cents: int) -> None:
 
 def _sign_locally(amount: float, order_number: str, url_ok: str, url_ko: str, pay_method: str) -> dict:
     merchant_code = os.getenv("REDSYS_MERCHANT_CODE", "263100000")
-    terminal = os.getenv("REDSYS_TERMINAL", "005")
+    terminal = os.getenv("REDSYS_TERMINAL", "007")
     redsys_url = os.getenv("REDSYS_URL", "https://sis-t.redsys.es:25443/sis/realizarPago")
     notify_url = os.getenv("REDSYS_NOTIFY_URL", "https://api.gobbly.app/payments/redsys-notify")
     pay_map = {"card": "C", "bizum": "z", "google_pay": "xpay", "apple_pay": "xpay"}
