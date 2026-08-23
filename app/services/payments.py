@@ -231,25 +231,63 @@ def confirm_redsys_payment(redsys_order_number: str, amount_cents: int) -> None:
     _maybe_close_order(order_id)
 
 
+def _sign_locally(amount: float, order_number: str, url_ok: str, url_ko: str, pay_method: str) -> dict:
+    merchant_code = os.getenv("REDSYS_MERCHANT_CODE", "263100000")
+    terminal = os.getenv("REDSYS_TERMINAL", "005")
+    redsys_url = os.getenv("REDSYS_URL", "https://sis-t.redsys.es:25443/sis/realizarPago")
+    notify_url = os.getenv("REDSYS_NOTIFY_URL", "https://api.gobbly.app/payments/redsys-notify")
+    pay_map = {"card": "C", "bizum": "z", "google_pay": "xpay", "apple_pay": "xpay"}
+
+    amount_cents = str(int(round(amount * 100)))
+    params = {
+        "DS_MERCHANT_AMOUNT": amount_cents,
+        "DS_MERCHANT_ORDER": order_number,
+        "DS_MERCHANT_MERCHANTCODE": merchant_code,
+        "DS_MERCHANT_TERMINAL": terminal,
+        "DS_MERCHANT_TRANSACTIONTYPE": "0",
+        "DS_MERCHANT_CURRENCY": "978",
+        "DS_MERCHANT_URLOK": url_ok,
+        "DS_MERCHANT_URLKO": url_ko,
+        "DS_MERCHANT_MERCHANTURL": notify_url,
+    }
+    if pay_method in pay_map:
+        params["DS_MERCHANT_PAYMETHODS"] = pay_map[pay_method]
+
+    merchant_params_b64 = base64.b64encode(json.dumps(params).encode("utf-8")).decode("ascii")
+    sig = _compute_redsys_signature(merchant_params_b64, order_number)
+
+    return {
+        "Ds_MerchantParameters": merchant_params_b64,
+        "Ds_Signature": sig,
+        "Ds_SignatureVersion": "HMAC_SHA256_V1",
+        "redsysUrl": redsys_url,
+        "orderNumber": order_number,
+    }
+
+
 def _sign_via_edge(amount: float, order_number: str, url_ok: str, url_ko: str, pay_method: str) -> dict:
     """Call the (service-role-only) redsys-sign edge function with the
-    server-computed amount and order number. The edge function sets the S2S
-    merchant URL itself, so it is never client-controlled."""
+    server-computed amount and order number. Falls back to local signing if
+    the edge function is unavailable."""
     key = _service_key()
-    resp = httpx.post(
-        _edge_function_url(),
-        json={
-            "amount": amount,
-            "orderNumber": order_number,
-            "urlOk": url_ok,
-            "urlKo": url_ko,
-            "payMethod": pay_method,
-        },
-        headers={"Authorization": f"Bearer {key}", "apikey": key},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = httpx.post(
+            _edge_function_url(),
+            json={
+                "amount": amount,
+                "orderNumber": order_number,
+                "urlOk": url_ok,
+                "urlKo": url_ko,
+                "payMethod": pay_method,
+            },
+            headers={"Authorization": f"Bearer {key}", "apikey": key},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return _sign_locally(amount, order_number, url_ok, url_ko, pay_method)
 
 
 def initiate_redsys(
@@ -286,7 +324,8 @@ def initiate_redsys(
         if portions > remaining:
             portions = remaining
         # Per-portion price of this line, pre-tax.
-        subtotal += item.dish_price * item.quantity * portions / item.split_portions
+        split_div = max(1, item.split_portions)
+        subtotal += item.dish_price * item.quantity * portions / split_div
         covered.append({"item_id": item.id, "portions": portions})
 
     subtotal = _round2(subtotal)
