@@ -92,10 +92,34 @@ def get_order_by_id(order_id: str) -> Order | None:
 
 
 def get_open_order_for_table(table_id: str) -> Order | None:
-    rows = get_client().table("orders").select("*, items:order_items(*), restaurant_tables(label, number)").eq("table_id", table_id).eq("status", "open").order("created_at", desc=True).limit(1).execute().data or []
+    rows = get_client().table("orders").select("*, items:order_items(*), restaurant_tables(label, number)").eq("table_id", table_id).eq("status", "open").order("created_at", desc=False).execute().data or []
     if not rows:
         return None
-    return Order(**_attach_table_label(rows[0]))
+    if len(rows) == 1:
+        return Order(**_attach_table_label(rows[0]))
+
+    primary = _attach_table_label(rows[0])
+    all_items = []
+    total_subtotal = 0.0
+    total_tax = 0.0
+    total_amount = 0.0
+    total_paid = 0.0
+
+    for r in rows:
+        items = r.get("items") or []
+        all_items.extend(items)
+        total_subtotal += float(r.get("subtotal") or 0.0)
+        total_tax += float(r.get("tax_amount") or 0.0)
+        total_amount += float(r.get("total") or 0.0)
+        total_paid += float(r.get("amount_paid") or 0.0)
+
+    primary["items"] = all_items
+    primary["subtotal"] = _round2(total_subtotal)
+    primary["tax_amount"] = _round2(total_tax)
+    primary["total"] = _round2(total_amount)
+    primary["amount_paid"] = _round2(total_paid)
+
+    return Order(**primary)
 
 
 def create_order(table_id: str, table_number: int, items: list[NewOrderItem], tenant_id: str = "") -> Order:
@@ -173,6 +197,11 @@ def close_order(order_id: str, tenant_id: str | None = None) -> None:
         "status": "closed",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", order_id).execute()
+    if order.table_id:
+        get_client().table("orders").update({
+            "status": "closed",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("table_id", order.table_id).eq("status", "open").execute()
     get_client().table("restaurant_tables").update({"status": "available", "active_order_id": None}).eq("id", order.table_id).execute()
     dish_svc.delete_custom_dishes_for_table(order.table_id)
 
