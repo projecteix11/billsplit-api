@@ -862,7 +862,9 @@ def create_prepay_order(
         new_subtotal = _calculate_subtotal_from_items(refreshed.items)
         new_tax = _calculate_tax(new_subtotal)
         new_total = _round2(new_subtotal + new_tax)
-        new_amount_paid = _round2(float(existing.subtotal + existing.tax_amount if existing.total is None else existing.total) + total)
+        is_online = payment_method in {"card", "bizum", "google_pay", "apple_pay"}
+        existing_paid = float(existing.amount_paid or 0.0) if existing.amount_paid is not None else 0.0
+        new_amount_paid = existing_paid if is_online else _round2(existing_paid + total)
 
         get_client().table("orders").update({
             "subtotal": new_subtotal,
@@ -880,6 +882,7 @@ def create_prepay_order(
         }).eq("id", table_id).execute()
         order = get_order_by_id(order_id)
     else:
+        is_online = payment_method in {"card", "bizum", "google_pay", "apple_pay"}
         order_row = {
             "table_id": table_id,
             "table_number": table_number,
@@ -887,7 +890,7 @@ def create_prepay_order(
             "subtotal": subtotal,
             "tax_amount": tax_amount,
             "total": total,
-            "amount_paid": total,
+            "amount_paid": 0.0 if is_online else total,
             "tenant_id": tenant_id,
         }
         inserted = get_client().table("orders").insert(order_row).execute().data
@@ -915,14 +918,15 @@ def create_prepay_order(
     tracking_code = f"GOB-{order.id[:6].upper()}"
     tracking_url = f"/track/{tracking_code}"
 
-    # Insert payment record
+    # Insert payment record (pending for online methods, confirmed for counter)
+    is_online = payment_method in {"card", "bizum", "google_pay", "apple_pay"}
     payment_row = {
         "order_id": order.id,
         "amount": total,
         "tip_amount": 0.0,
         "total_charged": total,
         "payment_method": payment_method or "card",
-        "status": "confirmed",
+        "status": "pending" if is_online else "confirmed",
         "reference": f"PREPAY-{tracking_code}",
     }
     payment_res = get_client().table("payments").insert(payment_row).execute().data

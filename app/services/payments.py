@@ -319,7 +319,7 @@ def initiate_redsys(
             raise ValueError(f"item {sel.itemId} does not belong to order {order_id}")
         remaining = item.split_portions - item.paid_portions
         if remaining <= 0:
-            raise ValueError(f"item {sel.itemId} is already paid")
+            continue
         portions = max(1, sel.portions)
         if portions > remaining:
             portions = remaining
@@ -327,6 +327,9 @@ def initiate_redsys(
         split_div = max(1, item.split_portions)
         subtotal += item.dish_price * item.quantity * portions / split_div
         covered.append({"item_id": item.id, "portions": portions})
+
+    if not covered:
+        raise ValueError("all selected items are already paid")
 
     subtotal = _round2(subtotal)
     if subtotal <= 0:
