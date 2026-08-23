@@ -324,6 +324,7 @@ class PrePayCheckoutResponse(BaseModel):
     tracking_code: str
     tracking_url: str
     payment_id: Optional[str] = None
+    created_item_ids: list[str] = []
 
 
 class OrderTrackingResponse(BaseModel):

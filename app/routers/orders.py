@@ -30,7 +30,7 @@ async def prepay_checkout(
             content={"data": None, "error": "tableId, tableNumber and items[] are required"},
         )
     try:
-        order, tracking_code, tracking_url, payment_id = svc.create_prepay_order(
+        order, tracking_code, tracking_url, payment_id, created_item_ids = svc.create_prepay_order(
             table_id=body.tableId,
             table_number=body.tableNumber,
             items=body.items,
@@ -83,6 +83,7 @@ async def prepay_checkout(
                     "tracking_code": tracking_code,
                     "tracking_url": tracking_url,
                     "payment_id": payment_id,
+                    "created_item_ids": created_item_ids,
                 },
                 "error": None,
             },

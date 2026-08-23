@@ -792,25 +792,23 @@ def _build_and_insert_prepay_items(
         }
         rows.append(row)
 
+    inserted = get_client().table("order_items").insert(rows).execute().data or []
     if ingredient_rows:
-        inserted = get_client().table("order_items").insert(rows).execute().data
-        if not inserted:
-            raise RuntimeError("failed to insert prepay order items")
-
         all_ing_rows: list[dict] = []
         for idx, ing_list in ingredient_rows.items():
-            order_item_id = inserted[idx]["id"]
-            for ing in ing_list:
-                all_ing_rows.append({
-                    "order_item_id": order_item_id,
-                    "ingredient_id": ing["ingredient_id"],
-                    "action": ing["action"],
-                })
+            if idx < len(inserted):
+                order_item_id = inserted[idx]["id"]
+                for ing in ing_list:
+                    all_ing_rows.append({
+                        "order_item_id": order_item_id,
+                        "ingredient_id": ing["ingredient_id"],
+                        "action": ing["action"],
+                    })
 
         if all_ing_rows:
             get_client().table("order_item_ingredients").insert(all_ing_rows).execute()
-    else:
-        get_client().table("order_items").insert(rows).execute()
+
+    return [r["id"] for r in inserted]
 
 
 def create_prepay_order(
@@ -824,10 +822,10 @@ def create_prepay_order(
     customer_phone: Optional[str] = None,
     notes: Optional[str] = None,
     tracking_code: Optional[str] = None,
-) -> tuple[Order, str, str, Optional[str]]:
+) -> tuple[Order, str, str, Optional[str], list[str]]:
     """Creates or updates an order with immediate pre-payment and dispatches items to kitchen.
 
-    Returns: (order, tracking_code, tracking_url, payment_id)
+    Returns: (order, tracking_code, tracking_url, payment_id, created_item_ids)
     """
     precomputed = _resolve_ingredient_customizations(items)
     resolved_prices = precomputed[0]
@@ -847,9 +845,10 @@ def create_prepay_order(
             if rows:
                 existing = get_order_by_id(rows[0]["id"])
 
+    created_item_ids: list[str] = []
     if existing:
         order_id = existing.id
-        _build_and_insert_prepay_items(
+        created_item_ids = _build_and_insert_prepay_items(
             order_id, items, precomputed=precomputed, diner_name=diner_name, notes=notes
         )
         if tenant_id:
@@ -899,7 +898,7 @@ def create_prepay_order(
         order = Order(**_attach_table_label(inserted[0]))
         order_id = order.id
 
-        _build_and_insert_prepay_items(
+        created_item_ids = _build_and_insert_prepay_items(
             order_id, items, precomputed=precomputed, diner_name=diner_name, notes=notes
         )
         if tenant_id:
@@ -932,7 +931,7 @@ def create_prepay_order(
     payment_res = get_client().table("payments").insert(payment_row).execute().data
     payment_id = payment_res[0]["id"] if payment_res else None
 
-    return order, tracking_code, tracking_url, payment_id
+    return order, tracking_code, tracking_url, payment_id, created_item_ids
 
 
 def get_order_tracking(tracking_code: str) -> dict | None:
