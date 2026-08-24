@@ -256,6 +256,7 @@ class Order(BaseModel):
     subtotal: float
     tax_amount: float
     total: float
+    amount_paid: Optional[float] = 0.0
     created_at: str
     updated_at: str
     items: list[OrderItem] = []
