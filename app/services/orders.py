@@ -313,6 +313,30 @@ def delete_order_item(item_id: str, tenant_id: str) -> None:
     _recalculate_order_totals(order_id)
 
 
+def cancel_prepay_items(item_ids: list[str], order_id: str, tenant_id: str = "") -> None:
+    """Delete/rollback unconfirmed prepay items and clean up order totals if payment failed."""
+    if not item_ids or not order_id:
+        return
+    # Delete only the specified items that are not paid
+    get_client().table("order_items").delete().in_("id", item_ids).eq("order_id", order_id).neq("payment_status", "paid").execute()
+
+    # Check remaining items in order
+    remaining = get_client().table("order_items").select("id").eq("order_id", order_id).execute().data or []
+    if not remaining:
+        # If no items left, delete empty order and release table
+        order_rows = get_client().table("orders").select("table_id").eq("id", order_id).execute().data or []
+        get_client().table("orders").delete().eq("id", order_id).execute()
+        if order_rows and order_rows[0].get("table_id"):
+            get_client().table("restaurant_tables").update({
+                "status": "available",
+                "active_order_id": None,
+                "is_app_used": False,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", order_rows[0]["table_id"]).execute()
+    else:
+        _recalculate_order_totals(order_id)
+
+
 def update_order_item_quantity(item_id: str, quantity: int, tenant_id: str) -> None:
     """Update the quantity of a single order item and recalculate parent order totals."""
     order_id = _assert_item_owner(item_id, tenant_id)

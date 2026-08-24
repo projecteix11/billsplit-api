@@ -328,6 +328,11 @@ class PrePayCheckoutResponse(BaseModel):
     created_item_ids: list[str] = []
 
 
+class CancelPrepayBody(BaseModel):
+    orderId: str
+    itemIds: list[str] = []
+
+
 class OrderTrackingResponse(BaseModel):
     order_id: str
     tracking_code: str

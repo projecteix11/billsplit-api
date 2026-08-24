@@ -7,7 +7,7 @@ from app.logging import log_event, LogFactory
 from app.middleware.auth import require_auth, require_customer_principal
 from app.middleware.rate_limit import limiter
 from app.middleware.tenant import get_current_tenant
-from app.models import CreateOrderBody, AddItemsBody, PrePayCheckoutBody, PrePayCheckoutResponse, OrderTrackingResponse
+from app.models import CreateOrderBody, AddItemsBody, PrePayCheckoutBody, PrePayCheckoutResponse, OrderTrackingResponse, CancelPrepayBody
 from app.db.supabase import get_client
 from app.services import activity as activity_svc
 from app.services import orders as svc
@@ -96,6 +96,18 @@ async def prepay_checkout(
             table_id=body.tableId,
             metadata={"error": str(e), "traceback": traceback.format_exc()[-500:]},
         ))
+        return internal_error(e)
+
+
+@router.post("/orders/pre-payment/cancel")
+async def cancel_prepay_order(
+    body: CancelPrepayBody,
+    tenant_id: str = Depends(get_current_tenant),
+):
+    try:
+        svc.cancel_prepay_items(body.itemIds, body.orderId, tenant_id)
+        return {"data": "cancelled", "error": None}
+    except Exception as e:
         return internal_error(e)
 
 
