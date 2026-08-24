@@ -1005,8 +1005,33 @@ def get_order_tracking(tracking_code: str) -> dict | None:
     else:
         overall_stage = "received"
 
-    p_rows = client.table("payments").select("id").eq("order_id", order.id).order("created_at", desc=True).limit(1).execute().data or []
-    payment_id = p_rows[0]["id"] if p_rows else None
+    p_rows = (
+        client.table("payments")
+        .select("id, amount, payment_method, status, created_at, covered_items")
+        .eq("order_id", order.id)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    confirmed_payments = [
+        {
+            "id": p["id"],
+            "amount": float(p.get("amount") or 0),
+            "payment_method": p.get("payment_method"),
+            "status": p.get("status"),
+            "created_at": p.get("created_at"),
+            "covered_items": p.get("covered_items"),
+        }
+        for p in p_rows
+        if p.get("status") in ("confirmed", "completed", "paid", None)
+    ]
+    payment_id = confirmed_payments[0]["id"] if confirmed_payments else None
+
+    # Compute paid total from confirmed payments or order column
+    computed_amount_paid = float(order_row.get("amount_paid") or 0)
+    if not computed_amount_paid and confirmed_payments:
+        computed_amount_paid = sum(p["amount"] for p in confirmed_payments)
 
     return {
         "order_id": order.id,
@@ -1018,7 +1043,7 @@ def get_order_tracking(tracking_code: str) -> dict | None:
         "subtotal": order.subtotal,
         "tax_amount": order.tax_amount,
         "total": order.total,
-        "amount_paid": float(order_row.get("amount_paid") or order.total),
+        "amount_paid": computed_amount_paid,
         "created_at": order.created_at,
         "updated_at": order.updated_at,
         "tenant_name": tenant_name,
@@ -1031,5 +1056,6 @@ def get_order_tracking(tracking_code: str) -> dict | None:
         "delivered_items": delivered_items,
         "items": [i.model_dump() for i in order.items],
         "payment_id": payment_id,
+        "payments": confirmed_payments,
     }
 
